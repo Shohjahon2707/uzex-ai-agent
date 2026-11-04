@@ -14,6 +14,7 @@ import json
 import re
 import sys
 import time
+import urllib.error
 import urllib.request
 
 NODATA = ("нет", "yo'q", "yo‘q", "yoq", "topilmadi", "mavjud emas", "не найден", "не найдено")
@@ -27,8 +28,11 @@ def ask(base, question):
     req = urllib.request.Request(base.rstrip("/") + "/api/ask", method="POST",
                                  data=json.dumps({"question": question}, ensure_ascii=False).encode("utf-8"),
                                  headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=120) as r:
-        return json.loads(r.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            return json.loads(r.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        return json.loads(exc.read().decode("utf-8"))
 
 
 def main():
@@ -53,7 +57,7 @@ def main():
                 ok = any(w in ans.lower() for w in NODATA)
             else:
                 ok = all(norm(x) in norm(ans) for x in (row.get("expected") or "").split("|") if x.strip())
-            ok = ok and dt < 90
+            ok = ok and dt < 90 and not res.get("error_code")
             passed += ok
             print(f"{'PASS' if ok else 'FAIL'}  {dt:5.1f}s  {q}")
             if not ok:

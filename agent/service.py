@@ -1,12 +1,13 @@
 """Цикл агента: LLM <-> инструменты (run_sql, lookup). Любой OpenAI-совместимый API."""
 import json
-import os
+import logging
 import time
 
 from . import tools
+from .llm import create_client, describe_error, get_config
 from .prompts import build_system_prompt
 
-MODEL = os.environ.get("LLM_MODEL", "gpt-4.1-mini")
+logger = logging.getLogger(__name__)
 MAX_STEPS = 6
 TOTAL_BUDGET = 70      # секунд на весь ответ (лимит конкурса — 90)
 TOOL_JSON_LIMIT = 14000
@@ -52,39 +53,50 @@ _use_temperature = True
 
 
 def get_client():
-    from openai import OpenAI
-
-    return OpenAI(
-        api_key=os.environ.get("LLM_API_KEY", ""),
-        base_url=os.environ.get("LLM_BASE_URL") or None,
-        timeout=40,
-        max_retries=1,
-    )
+    return create_client()
 
 
-def _chat(client, messages, with_tools=True):
+def _chat(client, messages, with_tools=True, deadline=None):
     """Один вызов LLM. Если модель не принимает temperature — повторяем без него."""
     global _use_temperature
-    kwargs = {"model": MODEL, "messages": messages}
+    kwargs = {"model": get_config().model, "messages": messages}
     if with_tools:
         kwargs["tools"] = TOOLS
     if _use_temperature:
         kwargs["temperature"] = 0
+
+    def send():
+        remaining = deadline - time.monotonic() if deadline is not None else 30
+        if remaining <= 0:
+            raise TimeoutError("Исчерпан бюджет времени на ответ.")
+        return client.with_options(timeout=min(30, remaining)).chat.completions.create(**kwargs)
+
     try:
-        return client.chat.completions.create(**kwargs)
+        return send()
     except Exception as e:  # noqa: BLE001
-        if _use_temperature and "temperature" in str(e).lower():
+        if (_use_temperature and getattr(e, "status_code", None) == 400
+                and "temperature" in str(e).lower()):
             _use_temperature = False
             kwargs.pop("temperature", None)
-            return client.chat.completions.create(**kwargs)
+            return send()
         raise
 
 
 def _clip(obj):
-    s = json.dumps(obj, ensure_ascii=False, default=str)
-    if len(s) > TOOL_JSON_LIMIT:
-        s = s[:TOOL_JSON_LIMIT] + '..."}'  # LLM увидит обрезку
-    return s
+    out = dict(obj)
+    for key in ("rows", "matches"):
+        if key in out:
+            out[key] = list(out[key])
+    while len(json.dumps(out, ensure_ascii=False, default=str)) > TOOL_JSON_LIMIT:
+        key = next((k for k in ("rows", "matches") if out.get(k)), None)
+        if key is None:
+            return json.dumps({"error": "Результат слишком большой. Уточни запрос или выбери меньше колонок."}, ensure_ascii=False)
+        out[key].pop()
+        out["truncated"] = True
+        if key == "rows":
+            out["row_count"] = len(out[key])
+        out["note"] = "Результат сокращён по размеру. Для точных итогов выполни агрегатный SQL-запрос."
+    return json.dumps(out, ensure_ascii=False, default=str)
 
 
 def _evidence_item(name, args, result):
@@ -97,7 +109,8 @@ def _evidence_item(name, args, result):
 
 
 def answer_question(question, history=None):
-    t0 = time.time()
+    t0 = time.monotonic()
+    deadline = t0 + TOTAL_BUDGET
     messages = [{"role": "system", "content": build_system_prompt()}]
     for h in (history or [])[-6:]:
         role, content = h.get("role"), h.get("content")
@@ -106,16 +119,23 @@ def answer_question(question, history=None):
     messages.append({"role": "user", "content": question})
 
     evidence = []
+    client = None
     try:
         client = get_client()
         for _ in range(MAX_STEPS):
-            if time.time() - t0 > TOTAL_BUDGET:
+            if time.monotonic() >= deadline:
                 break
-            resp = _chat(client, messages)
+            resp = _chat(client, messages, deadline=deadline)
             msg = resp.choices[0].message
             if not msg.tool_calls:
+                if not any(not item.get("error") for item in evidence):
+                    messages.append({"role": "assistant", "content": msg.content or ""})
+                    messages.append({"role": "user", "content": (
+                        "Ответ ещё не проверен по базе. Сначала используй run_sql или lookup. "
+                        "Если инструменты не работают, сообщи о невозможности проверки, а не об отсутствии данных.")})
+                    continue
                 return {"answer": (msg.content or "").strip(), "evidence": evidence,
-                        "seconds": round(time.time() - t0, 1)}
+                        "seconds": round(time.monotonic() - t0, 1)}
             messages.append({
                 "role": "assistant",
                 "content": msg.content,
@@ -128,17 +148,30 @@ def answer_question(question, history=None):
                     args = json.loads(tc.function.arguments or "{}")
                 except ValueError:
                     args = {}
-                result = tools.dispatch(tc.function.name, args)
+                if not isinstance(args, dict):
+                    args = {}
+                result = tools.dispatch(tc.function.name, args, deadline=deadline)
                 evidence.append(_evidence_item(tc.function.name, args, result))
                 messages.append({"role": "tool", "tool_call_id": tc.id, "content": _clip(result)})
 
         # Лимит шагов/времени: просим итог по уже полученному, без инструментов.
+        if time.monotonic() >= deadline:
+            raise TimeoutError("Исчерпан бюджет времени на ответ.")
+        if not any(not item.get("error") for item in evidence):
+            return {"answer": "Не удалось проверить ответ по базе. / Javobni ma’lumotlar bazasi orqali tekshirib bo‘lmadi.",
+                    "error_code": "unverified_answer", "evidence": evidence,
+                    "seconds": round(time.monotonic() - t0, 1)}
         messages.append({"role": "user", "content": (
-            "Дай итоговый ответ только по уже полученным результатам. Если их недостаточно — прямо скажи, "
-            "что в данных ответа не нашлось. Ничего не выдумывай.")})
-        resp = _chat(client, messages, with_tools=False)
+            "Дай итоговый ответ только по уже полученным результатам. Если их недостаточно или SQL завершился "
+            "ошибкой — скажи, что ответ не удалось подтвердить. Это не означает отсутствия данных. Ничего не выдумывай.")})
+        resp = _chat(client, messages, with_tools=False, deadline=deadline)
         return {"answer": (resp.choices[0].message.content or "").strip(), "evidence": evidence,
-                "seconds": round(time.time() - t0, 1)}
+                "seconds": round(time.monotonic() - t0, 1)}
     except Exception as e:  # noqa: BLE001
-        return {"answer": "Сервис временно недоступен, попробуйте ещё раз. / Xizmat vaqtincha ishlamayapti, qayta urinib ko'ring.",
-                "error": f"{type(e).__name__}: {e}", "evidence": evidence, "seconds": round(time.time() - t0, 1)}
+        error = describe_error(e)
+        logger.warning("LLM error [%s]: %s", error["code"], error["detail"])
+        return {"answer": error["message"], "error": error["detail"], "error_code": error["code"],
+                "evidence": evidence, "seconds": round(time.monotonic() - t0, 1)}
+    finally:
+        if client is not None:
+            client.close()
