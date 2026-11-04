@@ -1,2 +1,74 @@
-# uzex-ai-agent
-Birja bitimlari haqidagi savollarga rus va oʻzbek tillarida javob beradigan AI-agent — veb-servis
+# Birja AI — агент по реестру сделок биржи (RU + UZ)
+
+Веб-чат на Django. Агент (LLM) не отвечает «из головы»: он пишет SQL к базе реестра, получает строки и отвечает
+только по ним. Нет строк — честно говорит, что данных нет. Под каждым ответом виден SQL и результат.
+
+## Запуск у себя
+
+```bash
+python -m venv venv
+venv\Scripts\activate          # Linux/macOS: source venv/bin/activate
+pip install -r requirements.txt
+
+# 1) положи все CSV в папку data/ и собери базу (~1 минута)
+python scripts/build_db.py --data data --out data/birja.db
+#    внимательно прочитай «ОТЧЁТ-ПРОВЕРКА» в конце: количества по годам должны совпасть с README
+
+# 2) ключ LLM
+copy .env.example .env         # Linux/macOS: cp .env.example .env   (и впиши LLM_API_KEY)
+
+# 3) запуск
+python manage.py runserver
+# открыть http://127.0.0.1:8000
+
+# 4) прогон своих вопросов с эталоном
+python scripts/golden.py scripts/golden.csv http://127.0.0.1:8000
+```
+
+## Деплой на сервер (Ubuntu, 512 МБ)
+
+CSV и сборку базы на сервере НЕ делаем — собранный `birja.db` копируем целиком.
+
+```bash
+# на компьютере
+gzip -k data/birja.db
+scp data/birja.db.gz root@IP:/opt/birja.db.gz
+
+# на сервере (после удаления CS-сервера)
+fallocate -l 1G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+echo '/swapfile none swap sw 0 0' >> /etc/fstab
+apt update && apt install -y python3-venv git
+git clone <твой-приватный-репозиторий> /opt/birja && cd /opt/birja
+mkdir -p data && gunzip -c /opt/birja.db.gz > data/birja.db
+python3 -m venv venv && ./venv/bin/pip install -r requirements.txt gunicorn
+cp .env.example .env && nano .env      # LLM_API_KEY, DEBUG=0, DJANGO_SECRET_KEY
+ufw allow 8000 || true
+./venv/bin/gunicorn config.wsgi --bind 0.0.0.0:8000 --workers 2 --timeout 120
+```
+
+Чтобы работало после выхода из SSH и перезагрузки — systemd-сервис `/etc/systemd/system/birja.service`:
+
+```ini
+[Unit]
+Description=Birja AI
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/birja
+ExecStart=/opt/birja/venv/bin/gunicorn config.wsgi --bind 0.0.0.0:8000 --workers 2 --timeout 120
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+```
+
+`systemctl daemon-reload && systemctl enable --now birja` — и проверь `http://IP:8000/api/health`.
+
+## Устройство
+
+- `scripts/build_db.py` — CSV → SQLite, чистка чисел/дат, view `deals_v` (volume, unit_price, amount_uzs, amount_usd …).
+- `agent/tools.py` — `run_sql` (только SELECT, база открыта read-only, таймаут, лимит строк) и `lookup`
+  (поиск точных названий: регистр, ё/е, апострофы, опечатки Samarkand~Samarqand).
+- `agent/prompts.py` — правила ответа и схема базы (подставляется из самой базы).
+- `agent/service.py` — цикл LLM ↔ инструменты, любой OpenAI-совместимый API.
+- `templates/chat.html` — чат без регистрации и установки.

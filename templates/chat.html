@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Birja AI — Биржа / Birja</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#1b1f24; --mute:#6a7280; --line:#e2e5ea; --acc:#1f6feb; --accbg:#e8f0fe; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0f1318; --card:#171c23; --ink:#e7eaee; --mute:#8b94a1; --line:#262d37; --acc:#5b9dff; --accbg:#16263f; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 16px; min-height: 100vh; display:flex; flex-direction:column; }
+  h1 { font-size: 20px; margin: 8px 0 2px; }
+  .sub { color: var(--mute); font-size: 14px; margin-bottom: 12px; }
+  #log { flex:1; display:flex; flex-direction:column; gap:12px; padding-bottom: 12px; }
+  .msg { padding: 12px 14px; border-radius: 12px; border:1px solid var(--line); background:var(--card); white-space:pre-wrap; word-wrap:anywhere; }
+  .msg.user { background: var(--accbg); border-color: transparent; align-self:flex-end; max-width: 88%; }
+  .msg.bot { align-self:flex-start; max-width: 100%; }
+  .meta { color:var(--mute); font-size:12px; margin-top:8px; }
+  details { margin-top:10px; font-size:13px; }
+  summary { cursor:pointer; color:var(--acc); }
+  pre { background: var(--bg); border:1px solid var(--line); border-radius:8px; padding:8px; overflow:auto; font-size:12px; white-space:pre-wrap; }
+  table { border-collapse: collapse; font-size:12px; margin:6px 0; display:block; overflow:auto; max-width:100%; }
+  th, td { border:1px solid var(--line); padding:3px 7px; text-align:left; white-space:nowrap; }
+  th { background: var(--bg); }
+  .chips { display:flex; flex-wrap:wrap; gap:8px; margin: 6px 0 14px; }
+  .chip { border:1px solid var(--line); background:var(--card); color:var(--ink); padding:6px 10px; border-radius:16px; cursor:pointer; font-size:13px; }
+  .chip:hover { border-color: var(--acc); }
+  form { position: sticky; bottom: 0; background: var(--bg); padding: 10px 0 14px; display:flex; gap:8px; }
+  textarea { flex:1; resize:none; height:52px; padding:10px 12px; border-radius:12px; border:1px solid var(--line); background:var(--card); color:var(--ink); font:inherit; }
+  button.send { padding:0 18px; border:0; border-radius:12px; background:var(--acc); color:#fff; font-weight:600; cursor:pointer; }
+  button.send:disabled { opacity:.5; cursor:default; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Birja AI · Биржа реестри / Реестр сделок</h1>
+  <div class="sub">Savollarni o‘zbek yoki rus tilida yozing · Задавайте вопросы на русском или узбекском. Ответ строится только по данным реестра.</div>
+  <div class="chips" id="chips"></div>
+  <div id="log"></div>
+  <form id="f">
+    <textarea id="q" placeholder="Savolingizni yozing / Напишите вопрос…" autofocus></textarea>
+    <button class="send" id="btn" type="submit">OK</button>
+  </form>
+</div>
+<script>
+const log = document.getElementById('log'), q = document.getElementById('q'), btn = document.getElementById('btn');
+const history = [];
+const examples = [
+  'Сколько сделок было заключено в 2025 году?',
+  '2025-yilda nechta bitim tuzilgan?',
+  'Топ-5 брокеров по сумме сделок в сумах',
+  'Qaysi viloyatda eng ko‘p bitim bo‘lgan?'
+];
+const chips = document.getElementById('chips');
+examples.forEach(t => { const b = document.createElement('button'); b.type='button'; b.className='chip'; b.textContent=t;
+  b.onclick = () => { q.value = t; send(); }; chips.appendChild(b); });
+
+function add(cls, text) { const d = document.createElement('div'); d.className = 'msg ' + cls; d.textContent = text; log.appendChild(d); d.scrollIntoView({block:'end'}); return d; }
+
+function evidenceNode(ev) {
+  if (!ev || !ev.length) return null;
+  const det = document.createElement('details');
+  const s = document.createElement('summary'); s.textContent = 'Asos / Основание (SQL и результаты)'; det.appendChild(s);
+  ev.forEach(e => {
+    if (e.tool === 'run_sql') {
+      const p = document.createElement('pre'); p.textContent = e.sql; det.appendChild(p);
+      if (e.error) { const x = document.createElement('div'); x.textContent = 'Ошибка: ' + e.error; det.appendChild(x); return; }
+      if (e.columns && e.columns.length) {
+        const t = document.createElement('table');
+        const h = t.insertRow(); e.columns.forEach(c => { const th = document.createElement('th'); th.textContent = c; h.appendChild(th); });
+        (e.rows || []).forEach(r => { const tr = t.insertRow(); r.forEach(v => { tr.insertCell().textContent = v === null ? 'NULL' : v; }); });
+        det.appendChild(t);
+      }
+      if (e.note) { const n = document.createElement('div'); n.className='meta'; n.textContent = e.note; det.appendChild(n); }
+    } else {
+      const p = document.createElement('pre');
+      p.textContent = 'lookup ' + JSON.stringify(e.args) + '\n→ ' + (e.matches || []).map(m => m.value + ' (' + m.rows + ')').join('\n  ') + (e.note ? '\n' + e.note : '');
+      det.appendChild(p);
+    }
+  });
+  return det;
+}
+
+async function send() {
+  const text = q.value.trim(); if (!text || btn.disabled) return;
+  q.value = ''; btn.disabled = true; chips.style.display = 'none';
+  add('user', text);
+  const wait = add('bot', 'Ishlayapman… / Думаю…');
+  try {
+    const r = await fetch('/api/ask', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ question: text, history: history.slice(-6) }) });
+    const j = await r.json();
+    wait.textContent = j.answer || j.error || '—';
+    const ev = evidenceNode(j.evidence); if (ev) wait.appendChild(ev);
+    if (j.seconds != null) { const m = document.createElement('div'); m.className='meta'; m.textContent = j.seconds + ' c'; wait.appendChild(m); }
+    history.push({role:'user', content:text}, {role:'assistant', content:j.answer || ''});
+  } catch (e) {
+    wait.textContent = 'Ошибка сети / Tarmoq xatosi: ' + e;
+  }
+  btn.disabled = false; q.focus(); wait.scrollIntoView({block:'end'});
+}
+document.getElementById('f').addEventListener('submit', e => { e.preventDefault(); send(); });
+q.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
+</script>
+</body>
+</html>
