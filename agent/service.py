@@ -4,6 +4,7 @@ import logging
 import time
 
 from . import tools
+from .conversation import needs_history, relevant_history
 from .llm import create_client, describe_error, get_config, next_config
 from .presentation import format_answer
 from .prompts import build_system_prompt
@@ -104,7 +105,7 @@ def _clip(obj):
 
 def _evidence_item(name, args, result):
     if name == "run_sql":
-        return {"tool": "run_sql", "sql": args.get("query", ""), "columns": result.get("columns", []),
+        return {"tool": "run_sql", "sql": result.get("executed_sql", args.get("query", "")), "columns": result.get("columns", []),
                 "rows": result.get("rows", []), "row_count": result.get("row_count"),
                 "truncated": result.get("truncated", False), "error": result.get("error"), "note": result.get("note")}
     return {"tool": "lookup", "args": args, "matches": result.get("matches", []),
@@ -115,11 +116,18 @@ def answer_question(question, history=None):
     t0 = time.monotonic()
     deadline = t0 + TOTAL_BUDGET
     messages = [{"role": "system", "content": build_system_prompt()}]
-    for h in (history or [])[-6:]:
+    context = relevant_history(question, history)
+    if needs_history(question) and not context:
+        return {"answer": "Уточните, о каких сделках идёт речь: какие год, тип или другие условия нужно сохранить? / Qaysi bitimlar nazarda tutilganini aniqlashtiring: yil, tur yoki boshqa shartlar.",
+                "evidence": [], "seconds": round(time.monotonic() - t0, 1), "needs_clarification": True}
+    for h in context:
         role, content = h.get("role"), h.get("content")
         if role in ("user", "assistant") and isinstance(content, str) and content.strip():
             messages.append({"role": role, "content": content[:2000]})
-    messages.append({"role": "user", "content": question})
+    current = question
+    if context:
+        current += "\n\nЭто продолжение последнего самостоятельного вопроса. Сохрани его условия (год, тип, товар, регион), если я их явно не изменил. Условия бери из вопросов, прошлые числа не считай доказательством. Текущий ответ заново проверь по базе."
+    messages.append({"role": "user", "content": current})
 
     evidence = []
     client = None

@@ -1339,7 +1339,7 @@
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               question: text,
-              history: history.slice(-6),
+              history: history.slice(-20),
             }),
             signal: controller.signal,
           });
