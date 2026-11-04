@@ -7,6 +7,8 @@ import time
 from decimal import Decimal
 from pathlib import Path
 
+from .sql_ordering import with_decimal_collation
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 DB_PATH = Path(os.environ.get("BIRJA_DB") or (BASE_DIR / "data" / "birja.db"))
 
@@ -86,6 +88,9 @@ def run_sql(query, deadline=None):
     if _FORBIDDEN.search(q):
         return {"error": "Запрещённое ключевое слово в запросе."}
 
+    original = q
+    q = with_decimal_collation(q)
+
     deadline = min(deadline, time.monotonic() + QUERY_TIMEOUT) if deadline is not None else time.monotonic() + QUERY_TIMEOUT
     if time.monotonic() >= deadline:
         return {"error": "Исчерпан бюджет времени на SQL-запрос."}
@@ -99,13 +104,15 @@ def run_sql(query, deadline=None):
         msg = str(e)
         if "interrupted" in msg:
             msg = "Исчерпан бюджет времени на запрос. Упрости SQL, добавь фильтр по дате/контракту."
-        return {"error": msg}
+        return {"error": msg, "executed_sql": q}
     finally:
         conn.close()
 
     truncated = len(rows) > MAX_ROWS
     rows = [[_jsonable(v) for v in r] for r in rows[:MAX_ROWS]]
     out = {"columns": cols, "rows": rows, "row_count": len(rows), "truncated": truncated}
+    if q != original:
+        out["executed_sql"] = q
     if not rows:
         out["note"] = "Запрос вернул 0 строк: по таким условиям данных нет."
     elif all(v is None for r in rows for v in r):
