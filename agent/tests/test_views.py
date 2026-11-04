@@ -1,9 +1,34 @@
 from unittest.mock import patch
+import threading
 
 from django.test import SimpleTestCase, override_settings
+from agent import views
 
 
 class AskTests(SimpleTestCase):
+    def test_http_wait_is_bounded_even_if_provider_stalls(self):
+        release = threading.Event()
+        done = threading.Event()
+
+        def stalled(*args):
+            release.wait(2)
+            done.set()
+            return {"answer": "late answer"}
+
+        slots = threading.BoundedSemaphore(1)
+        try:
+            with patch.object(views, "_answer_slots", slots), patch.object(views, "RESPONSE_TIMEOUT", 0), patch("agent.views.service.answer_question", side_effect=stalled):
+                result, status = views._bounded_answer("test", [])
+                self.assertEqual(status, 504)
+                self.assertEqual(result["error_code"], "timeout")
+                self.assertNotIn("late answer", result["answer"])
+                busy_result, busy_status = views._bounded_answer("test", [])
+                self.assertEqual(busy_status, 503)
+                self.assertEqual(busy_result["error_code"], "busy")
+        finally:
+            release.set()
+            done.wait(2)
+
     def test_invalid_payloads_are_rejected(self):
         for payload in [[], {"question": 123}, {"question": " "},
                         {"question": "test", "history": "bad"},
