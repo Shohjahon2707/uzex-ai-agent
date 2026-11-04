@@ -34,7 +34,7 @@ def get_config():
         raise ConfigurationError("LLM_BASE_URL должен быть адресом API без ключей и параметров в URL.")
     if parsed.path.rstrip("/").endswith("/chat/completions"):
         raise ConfigurationError("Убери /chat/completions из LLM_BASE_URL: SDK добавляет этот путь сам.")
-    default_model = "llama-3.3-70b-versatile" if parsed.hostname == "api.groq.com" else "gpt-4.1-mini"
+    default_model = "openai/gpt-oss-120b" if parsed.hostname == "api.groq.com" else "gpt-4.1-mini"
     model = os.environ.get("LLM_MODEL", "").strip() or default_model
     return LLMConfig(key, base_url.rstrip("/"), model)
 

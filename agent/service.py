@@ -5,6 +5,7 @@ import time
 
 from . import tools
 from .llm import create_client, describe_error, get_config
+from .presentation import format_answer
 from .prompts import build_system_prompt
 
 logger = logging.getLogger(__name__)
@@ -102,9 +103,9 @@ def _clip(obj):
 def _evidence_item(name, args, result):
     if name == "run_sql":
         return {"tool": "run_sql", "sql": args.get("query", ""), "columns": result.get("columns", []),
-                "rows": result.get("rows", [])[:15], "row_count": result.get("row_count"),
+                "rows": result.get("rows", []), "row_count": result.get("row_count"),
                 "truncated": result.get("truncated", False), "error": result.get("error"), "note": result.get("note")}
-    return {"tool": "lookup", "args": args, "matches": result.get("matches", [])[:10],
+    return {"tool": "lookup", "args": args, "matches": result.get("matches", []),
             "error": result.get("error"), "note": result.get("note")}
 
 
@@ -134,7 +135,7 @@ def answer_question(question, history=None):
                         "Ответ ещё не проверен по базе. Сначала используй run_sql или lookup. "
                         "Если инструменты не работают, сообщи о невозможности проверки, а не об отсутствии данных.")})
                     continue
-                return {"answer": (msg.content or "").strip(), "evidence": evidence,
+                return {"answer": format_answer(msg.content or "", evidence), "evidence": evidence,
                         "seconds": round(time.monotonic() - t0, 1)}
             messages.append({
                 "role": "assistant",
@@ -165,7 +166,7 @@ def answer_question(question, history=None):
             "Дай итоговый ответ только по уже полученным результатам. Если их недостаточно или SQL завершился "
             "ошибкой — скажи, что ответ не удалось подтвердить. Это не означает отсутствия данных. Ничего не выдумывай.")})
         resp = _chat(client, messages, with_tools=False, deadline=deadline)
-        return {"answer": (resp.choices[0].message.content or "").strip(), "evidence": evidence,
+        return {"answer": format_answer(resp.choices[0].message.content or "", evidence), "evidence": evidence,
                 "seconds": round(time.monotonic() - t0, 1)}
     except Exception as e:  # noqa: BLE001
         error = describe_error(e)

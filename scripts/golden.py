@@ -4,7 +4,7 @@
 
     python scripts/golden.py scripts/golden.csv http://127.0.0.1:8000
 
-golden.csv: колонки  question ; expected ; mode
+golden.csv: колонки question,expected,mode (CSV с запятой)
   mode=contains — в ответе должны быть все значения из expected (через |); пробелы/запятые в числах не важны
   mode=nodata   — агент должен честно сказать, что данных нет (expected не нужен)
 Эталон считай САМ напрямую (pandas / SQL по CSV), не словами агента.
@@ -16,12 +16,29 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from decimal import Decimal
 
 NODATA = ("нет", "yo'q", "yo‘q", "yoq", "topilmadi", "mavjud emas", "не найден", "не найдено")
 
 
 def norm(s):
     return re.sub(r"[\s  ,]+", "", s.lower())
+
+
+def contains_value(answer, expected):
+    value = norm(expected)
+    if re.fullmatch(r"-?\d+(\.\d+)?", value):
+        pattern = r"(?<![\w\d])[-+]?(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:[ \u00a0\u202f]\d{3})*(?:[.,]\d+)?)(?![\w\d])"
+        for match in re.finditer(pattern, answer):
+            token = re.sub(r"\s", "", match.group())
+            if re.fullmatch(r"[-+]?\d{1,3}(,\d{3})+(\.\d+)?", token):
+                token = token.replace(",", "")
+            else:
+                token = token.replace(",", ".")
+            if Decimal(token) == Decimal(value):
+                return True
+        return False
+    return value in norm(answer)
 
 
 def ask(base, question):
@@ -56,7 +73,7 @@ def main():
             if mode == "nodata":
                 ok = any(w in ans.lower() for w in NODATA)
             else:
-                ok = all(norm(x) in norm(ans) for x in (row.get("expected") or "").split("|") if x.strip())
+                ok = all(contains_value(ans, x) for x in (row.get("expected") or "").split("|") if x.strip())
             ok = ok and dt < 90 and not res.get("error_code")
             passed += ok
             print(f"{'PASS' if ok else 'FAIL'}  {dt:5.1f}s  {q}")
@@ -66,7 +83,8 @@ def main():
                     if e.get("sql"):
                         print(f"      SQL: {e['sql'][:300]}")
     print(f"\n{passed}/{total} прошли")
+    return int(passed != total)
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

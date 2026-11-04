@@ -1,114 +1,1414 @@
 <!doctype html>
 <html lang="ru">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Birja AI — Биржа / Birja</title>
-<style>
-  :root { --bg:#f6f7f9; --card:#fff; --ink:#1b1f24; --mute:#6a7280; --line:#e2e5ea; --acc:#1f6feb; --accbg:#e8f0fe; }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg:#0f1318; --card:#171c23; --ink:#e7eaee; --mute:#8b94a1; --line:#262d37; --acc:#5b9dff; --accbg:#16263f; }
-  }
-  * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
-  .wrap { max-width: 860px; margin: 0 auto; padding: 16px; min-height: 100vh; display:flex; flex-direction:column; }
-  h1 { font-size: 20px; margin: 8px 0 2px; }
-  .sub { color: var(--mute); font-size: 14px; margin-bottom: 12px; }
-  #log { flex:1; display:flex; flex-direction:column; gap:12px; padding-bottom: 12px; }
-  .msg { padding: 12px 14px; border-radius: 12px; border:1px solid var(--line); background:var(--card); white-space:pre-wrap; word-wrap:anywhere; }
-  .msg.user { background: var(--accbg); border-color: transparent; align-self:flex-end; max-width: 88%; }
-  .msg.bot { align-self:flex-start; max-width: 100%; }
-  .meta { color:var(--mute); font-size:12px; margin-top:8px; }
-  details { margin-top:10px; font-size:13px; }
-  summary { cursor:pointer; color:var(--acc); }
-  pre { background: var(--bg); border:1px solid var(--line); border-radius:8px; padding:8px; overflow:auto; font-size:12px; white-space:pre-wrap; }
-  table { border-collapse: collapse; font-size:12px; margin:6px 0; display:block; overflow:auto; max-width:100%; }
-  th, td { border:1px solid var(--line); padding:3px 7px; text-align:left; white-space:nowrap; }
-  th { background: var(--bg); }
-  .chips { display:flex; flex-wrap:wrap; gap:8px; margin: 6px 0 14px; }
-  .chip { border:1px solid var(--line); background:var(--card); color:var(--ink); padding:6px 10px; border-radius:16px; cursor:pointer; font-size:13px; }
-  .chip:hover { border-color: var(--acc); }
-  form { position: sticky; bottom: 0; background: var(--bg); padding: 10px 0 14px; display:flex; gap:8px; }
-  textarea { flex:1; resize:none; height:52px; padding:10px 12px; border-radius:12px; border:1px solid var(--line); background:var(--card); color:var(--ink); font:inherit; }
-  button.send { padding:0 18px; border:0; border-radius:12px; background:var(--acc); color:#fff; font-weight:600; cursor:pointer; }
-  button.send:disabled { opacity:.5; cursor:default; }
-</style>
-</head>
-<body>
-<div class="wrap">
-  <h1>Birja AI · Биржа реестри / Реестр сделок</h1>
-  <div class="sub">Savollarni o‘zbek yoki rus tilida yozing · Задавайте вопросы на русском или узбекском. Ответ строится только по данным реестра.</div>
-  <div class="chips" id="chips"></div>
-  <div id="log"></div>
-  <form id="f">
-    <textarea id="q" placeholder="Savolingizni yozing / Напишите вопрос…" autofocus></textarea>
-    <button class="send" id="btn" type="submit">OK</button>
-  </form>
-</div>
-<script>
-const log = document.getElementById('log'), q = document.getElementById('q'), btn = document.getElementById('btn');
-const history = [];
-const examples = [
-  'Сколько сделок было заключено в 2025 году?',
-  '2025-yilda nechta bitim tuzilgan?',
-  'Топ-5 брокеров по сумме сделок в сумах',
-  'Qaysi viloyatda eng ko‘p bitim bo‘lgan?'
-];
-const chips = document.getElementById('chips');
-examples.forEach(t => { const b = document.createElement('button'); b.type='button'; b.className='chip'; b.textContent=t;
-  b.onclick = () => { q.value = t; send(); }; chips.appendChild(b); });
-
-function add(cls, text) { const d = document.createElement('div'); d.className = 'msg ' + cls; d.textContent = text; log.appendChild(d); d.scrollIntoView({block:'end'}); return d; }
-
-function evidenceNode(ev) {
-  if (!ev || !ev.length) return null;
-  const det = document.createElement('details');
-  const s = document.createElement('summary'); s.textContent = 'Asos / Основание (SQL и результаты)'; det.appendChild(s);
-  ev.forEach(e => {
-    if (e.tool === 'run_sql') {
-      const p = document.createElement('pre'); p.textContent = e.sql; det.appendChild(p);
-      if (e.error) { const x = document.createElement('div'); x.textContent = 'Ошибка: ' + e.error; det.appendChild(x); return; }
-      if (e.columns && e.columns.length) {
-        const t = document.createElement('table');
-        const h = t.insertRow(); e.columns.forEach(c => { const th = document.createElement('th'); th.textContent = c; h.appendChild(th); });
-        (e.rows || []).forEach(r => { const tr = t.insertRow(); r.forEach(v => { tr.insertCell().textContent = v === null ? 'NULL' : v; }); });
-        det.appendChild(t);
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>Birja AI — Аналитика биржевых сделок</title>
+    <style>
+      :root {
+        --bg: #10151c;
+        --side: #0c1117;
+        --card: #18202b;
+        --line: #293341;
+        --ink: #eff3f8;
+        --muted: #98a6b8;
+        --accent: #7cdec0;
+        --user: #213746;
+        --danger: #ffb4ab;
       }
-      if (e.note) { const n = document.createElement('div'); n.className='meta'; n.textContent = e.note; det.appendChild(n); }
-    } else {
-      const p = document.createElement('pre');
-      p.textContent = 'lookup ' + JSON.stringify(e.args) + '\n→ ' + (e.matches || []).map(m => m.value + ' (' + m.rows + ')').join('\n  ') + (e.note ? '\n' + e.note : '');
-      det.appendChild(p);
-    }
-  });
-  return det;
-}
-
-async function send() {
-  const text = q.value.trim(); if (!text || btn.disabled) return;
-  q.value = ''; btn.disabled = true; chips.style.display = 'none';
-  add('user', text);
-  const wait = add('bot', 'Ishlayapman… / Думаю…');
-  try {
-    const r = await fetch('/api/ask', { method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ question: text, history: history.slice(-6) }) });
-    const j = await r.json();
-    wait.textContent = j.answer || j.error || '—';
-    if (j.error_code && j.error) {
-      const d = document.createElement('details');
-      const s = document.createElement('summary'); s.textContent = 'Диагностика / Diagnostika'; d.appendChild(s);
-      const p = document.createElement('pre'); p.textContent = j.error; d.appendChild(p); wait.appendChild(d);
-    }
-    const ev = evidenceNode(j.evidence); if (ev) wait.appendChild(ev);
-    if (j.seconds != null) { const m = document.createElement('div'); m.className='meta'; m.textContent = j.seconds + ' c'; wait.appendChild(m); }
-    if (r.ok && !j.error_code) history.push({role:'user', content:text}, {role:'assistant', content:j.answer || ''});
-  } catch (e) {
-    wait.textContent = 'Ошибка сети / Tarmoq xatosi: ' + e;
-  }
-  btn.disabled = false; q.focus(); wait.scrollIntoView({block:'end'});
-}
-document.getElementById('f').addEventListener('submit', e => { e.preventDefault(); send(); });
-q.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
-</script>
-</body>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font:
+          15px/1.6 system-ui,
+          -apple-system,
+          "Segoe UI",
+          sans-serif;
+      }
+      button,
+      textarea {
+        font: inherit;
+      }
+      button {
+        cursor: pointer;
+      }
+      button:focus-visible,
+      summary:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 4px;
+      }
+      button:disabled {
+        cursor: wait;
+        opacity: 0.55;
+      }
+      .shell {
+        display: grid;
+        grid-template-columns: 250px minmax(0, 1fr);
+        min-height: 100dvh;
+      }
+      .sidebar {
+        position: sticky;
+        top: 0;
+        height: 100dvh;
+        background: var(--side);
+        border-right: 1px solid var(--line);
+        padding: 30px 20px 22px;
+        display: flex;
+        flex-direction: column;
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 700;
+        font-size: 22px;
+        letter-spacing: -0.6px;
+      }
+      .brand-icon {
+        width: 34px;
+        height: 34px;
+        background: var(--accent);
+        color: #092b21;
+        border-radius: 10px;
+        display: grid;
+        place-items: center;
+      }
+      .brand small {
+        font-size: 11px;
+        color: var(--accent);
+        border: 1px solid #345648;
+        border-radius: 5px;
+        padding: 1px 5px;
+        letter-spacing: 0;
+      }
+      .eyebrow {
+        font-size: 10px;
+        letter-spacing: 1.5px;
+        color: var(--muted);
+        font-weight: 650;
+        text-transform: uppercase;
+      }
+      .side-description {
+        font-size: 13px;
+        color: var(--muted);
+        margin: 16px 0 30px;
+      }
+      .new-chat {
+        display: flex;
+        justify-content: center;
+        gap: 10px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: transparent;
+        color: var(--ink);
+        padding: 10px 12px;
+      }
+      .new-chat:hover,
+      .side-example:hover {
+        background: var(--card);
+      }
+      .side-section {
+        margin-top: 30px;
+      }
+      .side-examples {
+        display: grid;
+        gap: 4px;
+        margin-top: 10px;
+      }
+      .side-example {
+        border: 0;
+        background: transparent;
+        color: var(--muted);
+        text-align: left;
+        padding: 8px;
+        border-radius: 8px;
+        font-size: 12px;
+      }
+      .side-example:hover {
+        color: var(--ink);
+      }
+      .dataset {
+        margin-top: auto;
+        padding-top: 28px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .dataset strong {
+        display: block;
+        color: var(--ink);
+        font-size: 15px;
+        font-weight: 550;
+        margin: 8px 0 2px;
+      }
+      .dataset-note {
+        font-size: 11px;
+        margin-top: 10px;
+      }
+      main {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        min-height: 100dvh;
+      }
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 18px 34px;
+        border-bottom: 1px solid var(--line);
+      }
+      .topbar-title {
+        font-size: 13px;
+        font-weight: 550;
+      }
+      .topbar-sub {
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .top-actions {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+      }
+      .status {
+        color: var(--muted);
+        font-size: 11px;
+        display: flex;
+        align-items: center;
+        gap: 7px;
+      }
+      .status-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--muted);
+      }
+      .status.ready .status-dot {
+        background: var(--accent);
+      }
+      .languages {
+        display: flex;
+        background: var(--side);
+        padding: 3px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+      }
+      .language {
+        border: 0;
+        background: transparent;
+        color: var(--muted);
+        padding: 3px 8px;
+        border-radius: 5px;
+        font-size: 11px;
+      }
+      .language[aria-pressed="true"] {
+        background: var(--card);
+        color: var(--ink);
+      }
+      .conversation {
+        width: 100%;
+        max-width: 920px;
+        margin: 0 auto;
+        padding: 0 38px;
+        flex: 1;
+      }
+      .welcome {
+        max-width: 680px;
+        padding: 64px 0 40px;
+        margin: auto;
+      }
+      .welcome-mark {
+        width: 46px;
+        height: 46px;
+        border: 1px solid #3d6859;
+        border-radius: 14px;
+        color: var(--accent);
+        display: grid;
+        place-items: center;
+        margin-bottom: 25px;
+      }
+      h1 {
+        font-size: clamp(27px, 3.5vw, 38px);
+        line-height: 1.25;
+        font-weight: 600;
+        letter-spacing: -1px;
+        margin: 12px 0;
+      }
+      .intro {
+        max-width: 540px;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.8;
+      }
+      .examples {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        margin-top: 28px;
+      }
+      .example {
+        display: flex;
+        align-items: flex-start;
+        gap: 13px;
+        padding: 16px;
+        text-align: left;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: transparent;
+        color: var(--ink);
+      }
+      .example:hover {
+        background: var(--card);
+        border-color: #4b655d;
+      }
+      .example-icon {
+        color: var(--accent);
+        font-size: 19px;
+      }
+      .example strong {
+        display: block;
+        font-size: 12px;
+        font-weight: 550;
+        margin-bottom: 4px;
+      }
+      .example span span {
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.6;
+        display: block;
+      }
+      #log {
+        padding: 28px 0 12px;
+      }
+      .turn {
+        margin-bottom: 28px;
+        min-width: 0;
+      }
+      .user-row {
+        display: flex;
+        justify-content: flex-end;
+      }
+      .user-message {
+        max-width: 85%;
+        padding: 12px 18px;
+        background: var(--user);
+        border: 1px solid #304a59;
+        border-radius: 16px 16px 4px 16px;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .assistant-heading {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        font-size: 12px;
+        font-weight: 600;
+        margin-bottom: 10px;
+      }
+      .avatar {
+        width: 25px;
+        height: 25px;
+        display: grid;
+        place-items: center;
+        background: #20392f;
+        border-radius: 7px;
+        color: var(--accent);
+      }
+      .answer-card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 4px 14px 14px 14px;
+        padding: 21px 23px 0;
+        overflow: hidden;
+      }
+      .answer-body {
+        font-size: 15px;
+        line-height: 1.85;
+        padding-bottom: 18px;
+        overflow-wrap: anywhere;
+      }
+      .answer-body p {
+        margin: 0 0 12px;
+      }
+      .answer-body p:last-child {
+        margin-bottom: 0;
+      }
+      .answer-body strong {
+        font-weight: 650;
+        color: #fff;
+      }
+      .answer-body ol,
+      .answer-body ul {
+        padding-left: 22px;
+        margin: 10px 0;
+      }
+      .answer-body li {
+        padding: 3px 0;
+      }
+      .answer-body code {
+        background: var(--side);
+        padding: 2px 5px;
+        border-radius: 4px;
+        font-size: 12px;
+      }
+      .answer-footer {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex-wrap: wrap;
+        border-top: 1px solid var(--line);
+        padding: 12px 0;
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .source-label {
+        color: var(--accent);
+      }
+      .answer-time {
+        margin-left: auto;
+        white-space: nowrap;
+      }
+      .evidence {
+        border-top: 1px solid var(--line);
+        font-size: 12px;
+      }
+      .evidence > summary {
+        padding: 12px 0;
+        color: var(--muted);
+        cursor: pointer;
+      }
+      .evidence[open] > summary {
+        color: var(--ink);
+      }
+      .evidence-content {
+        padding: 0 0 17px;
+      }
+      .evidence-step {
+        border-top: 1px solid var(--line);
+        padding-top: 12px;
+        margin-top: 12px;
+      }
+      .evidence-step:first-child {
+        border-top: 0;
+        padding-top: 0;
+        margin-top: 0;
+      }
+      .evidence-title {
+        font-size: 11px;
+        color: var(--muted);
+        margin-bottom: 8px;
+      }
+      .technical {
+        margin-top: 8px;
+        color: var(--muted);
+        font-size: 11px;
+      }
+      summary {
+        user-select: none;
+      }
+      pre {
+        background: var(--side);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 12px;
+        overflow: auto;
+        color: #b8c9db;
+        font:
+          11px/1.7 ui-monospace,
+          Consolas,
+          monospace;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .table-wrap {
+        width: 100%;
+        overflow: auto;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        margin: 8px 0;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        text-align: left;
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+      }
+      th {
+        font-weight: 550;
+        color: var(--muted);
+        background: #141c26;
+      }
+      th,
+      td {
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--line);
+        white-space: nowrap;
+      }
+      tr:last-child td {
+        border-bottom: 0;
+      }
+      .table-caption {
+        font-size: 11px;
+        color: var(--muted);
+        padding-top: 4px;
+      }
+      .lookup-values {
+        color: var(--muted);
+        margin: 4px 0 0;
+        padding-left: 18px;
+      }
+      .error-card {
+        border-color: #754947;
+      }
+      .error-label {
+        color: var(--danger);
+      }
+      .retry {
+        border: 1px solid var(--line);
+        color: var(--ink);
+        background: transparent;
+        padding: 6px 11px;
+        border-radius: 7px;
+        font-size: 12px;
+        margin-bottom: 16px;
+      }
+      .loading {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--muted);
+        font-size: 13px;
+        padding: 4px 0;
+      }
+      .spinner {
+        width: 13px;
+        height: 13px;
+        border: 2px solid #3a4a59;
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        flex-shrink: 0;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .composer-area {
+        position: sticky;
+        bottom: 0;
+        padding: 15px 38px 18px;
+        background: var(--bg);
+        width: 100%;
+        max-width: 920px;
+        margin: 0 auto;
+      }
+      .composer {
+        display: flex;
+        align-items: flex-end;
+        gap: 12px;
+        border: 1px solid #3a4857;
+        border-radius: 14px;
+        background: var(--card);
+        padding: 12px;
+        box-shadow: 0 8px 25px #0002;
+      }
+      .composer:focus-within {
+        border-color: #6c9b8a;
+      }
+      textarea {
+        flex: 1;
+        min-width: 0;
+        resize: none;
+        height: 42px;
+        max-height: 160px;
+        border: 0;
+        background: transparent;
+        color: var(--ink);
+        padding: 9px 4px;
+        line-height: 1.5;
+        outline: none;
+      }
+      textarea::placeholder {
+        color: #7f8ea1;
+      }
+      .send {
+        border: 0;
+        width: 40px;
+        height: 40px;
+        border-radius: 10px;
+        background: var(--accent);
+        color: #092b21;
+        display: grid;
+        place-items: center;
+        flex-shrink: 0;
+      }
+      .composer-hint {
+        text-align: center;
+        color: var(--muted);
+        font-size: 10px;
+        margin-top: 9px;
+      }
+      .mobile-clear {
+        display: none;
+        background: transparent;
+        border: 0;
+        color: var(--muted);
+        font-size: 18px;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      @media (max-width: 1050px) {
+        .shell {
+          grid-template-columns: 220px minmax(0, 1fr);
+        }
+        .sidebar {
+          padding: 24px 16px;
+        }
+        .conversation {
+          padding: 0 25px;
+        }
+        .composer-area {
+          padding-left: 25px;
+          padding-right: 25px;
+        }
+      }
+      @media (max-width: 740px) {
+        .shell {
+          display: block;
+        }
+        .sidebar {
+          display: none;
+        }
+        .topbar {
+          padding: 14px 18px;
+        }
+        .topbar-title {
+          font-size: 14px;
+        }
+        .status {
+          display: none;
+        }
+        .mobile-clear {
+          display: block;
+        }
+        .conversation {
+          padding: 0 18px;
+        }
+        .welcome {
+          padding-top: 38px;
+        }
+        .examples {
+          gap: 8px;
+        }
+        .example {
+          padding: 12px;
+          gap: 8px;
+        }
+        .example-icon {
+          display: none;
+        }
+        .composer-area {
+          padding: 12px 16px 14px;
+        }
+        .answer-card {
+          padding: 17px 16px 0;
+        }
+        .answer-body {
+          font-size: 14px;
+        }
+        .user-message {
+          max-width: 94%;
+          font-size: 14px;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .spinner {
+          animation: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar" aria-label="Навигация">
+        <div class="brand">
+          <span class="brand-icon" aria-hidden="true"
+            ><svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="M5 19V11M12 19V5M19 19V8" /></svg
+          ></span>
+          Birja
+          <small>AI</small>
+        </div>
+        <p class="side-description" data-i18n="sideDescription"></p>
+        <button class="new-chat" type="button" id="newChat">
+          <span aria-hidden="true">＋</span><span data-i18n="newChat"></span>
+        </button>
+        <div class="side-section">
+          <div class="eyebrow" data-i18n="explore"></div>
+          <div class="side-examples" id="sideExamples"></div>
+        </div>
+        <div class="dataset">
+          <div class="eyebrow" data-i18n="dataset"></div>
+          <strong id="dealCount">—</strong>
+          <div id="dataPeriod"></div>
+          <div class="dataset-note" data-i18n="fictional"></div>
+        </div>
+      </aside>
+      <main>
+        <header class="topbar">
+          <div>
+            <div class="topbar-title" data-i18n="title"></div>
+            <div class="topbar-sub" data-i18n="subtitle"></div>
+          </div>
+          <div class="top-actions">
+            <div class="status" id="status">
+              <span class="status-dot"></span><span id="statusText"></span>
+            </div>
+            <div class="languages" aria-label="Язык интерфейса">
+              <button
+                class="language"
+                type="button"
+                data-language="ru"
+                aria-pressed="true"
+              >
+                RU</button
+              ><button
+                class="language"
+                type="button"
+                data-language="uz"
+                aria-pressed="false"
+              >
+                O‘Z
+              </button>
+            </div>
+            <button
+              class="mobile-clear"
+              type="button"
+              id="mobileClear"
+              aria-label="Новый диалог"
+            >
+              ＋
+            </button>
+          </div>
+        </header>
+        <div class="conversation">
+          <section class="welcome" id="welcome">
+            <div class="welcome-mark" aria-hidden="true">
+              <svg
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+              >
+                <path d="M4 19V5m0 14h16M8 14l4-5 4 3 4-7" />
+              </svg>
+            </div>
+            <div class="eyebrow" data-i18n="welcomeLabel"></div>
+            <h1 data-i18n="welcomeTitle"></h1>
+            <p class="intro" data-i18n="intro"></p>
+            <div class="examples" id="examples"></div>
+          </section>
+          <div
+            id="log"
+            role="log"
+            aria-label="Диалог"
+            aria-live="polite"
+            aria-relevant="additions"
+          ></div>
+        </div>
+        <div class="composer-area">
+          <form class="composer" id="form">
+            <textarea
+              id="question"
+              rows="1"
+              maxlength="1500"
+              aria-label="Вопрос"
+              autofocus
+            ></textarea
+            ><button
+              class="send"
+              id="send"
+              type="submit"
+              aria-label="Отправить вопрос"
+            >
+              <svg
+                width="21"
+                height="21"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+              >
+                <path d="M12 19V5m-6 6 6-6 6 6" />
+              </svg>
+            </button>
+          </form>
+          <div class="composer-hint" data-i18n="hint"></div>
+        </div>
+      </main>
+    </div>
+    <script>
+      "use strict";
+      const texts = {
+        ru: {
+          sideDescription:
+            "Вопросы к реестру биржевых сделок на обычном языке.",
+          newChat: "Новый диалог",
+          explore: "Что можно узнать",
+          dataset: "Данные реестра",
+          fictional: "Учебные данные. Компании и сделки вымышлены.",
+          title: "Биржевой аналитик",
+          subtitle: "Товарно-сырьевая биржа · RU / UZ",
+          ready: "Реестр подключён",
+          unavailable: "Реестр недоступен",
+          checking: "Проверяем реестр",
+          welcomeLabel: "Данные → понятные ответы",
+          welcomeTitle: "Что хотите узнать о торгах?",
+          intro:
+            "Сравните объёмы, найдите участников и изучите сделки. Задайте вопрос по-русски или по-узбекски — вместе с ответом можно посмотреть расчёт.",
+          placeholder: "Например: сколько сделок заключено в 2025 году?",
+          hint: "Enter — отправить · Shift + Enter — новая строка",
+          thinking: "Считаю по реестру",
+          source: "Источник: реестр сделок",
+          evidence: "Данные и расчёт",
+          sql: "Показать SQL-запрос",
+          query: "Результат запроса",
+          lookup: "Найденные названия",
+          seconds: "с",
+          retry: "Повторить вопрос",
+          network:
+            "Не удалось получить ответ. Проверьте соединение и повторите вопрос.",
+          diagnostics: "Технические подробности",
+          noValue: "Нет значения",
+          truncated:
+            "Показана часть результата. Для полного списка уточните вопрос.",
+          empty: "По этому запросу строк не найдено.",
+          deals: "сделок",
+          lookupError: "Не удалось выполнить поиск",
+          queryError: "Не удалось выполнить расчёт",
+          emptyReply: "Сервис не вернул текст ответа.",
+        },
+        uz: {
+          sideDescription:
+            "Birja bitimlari reyestriga oddiy tilda savol bering.",
+          newChat: "Yangi suhbat",
+          explore: "Nimalarni bilish mumkin",
+          dataset: "Reyestr ma’lumotlari",
+          fictional:
+            "O‘quv ma’lumotlari. Kompaniyalar va bitimlar o‘ylab topilgan.",
+          title: "Birja tahlilchisi",
+          subtitle: "Tovar-xomashyo birjasi · RU / UZ",
+          ready: "Reyestr ulangan",
+          unavailable: "Reyestr mavjud emas",
+          checking: "Reyestr tekshirilmoqda",
+          welcomeLabel: "Ma’lumotlardan aniq javoblarga",
+          welcomeTitle: "Savdolar haqida nimani bilmoqchisiz?",
+          intro:
+            "Hajmlarni solishtiring, ishtirokchilarni toping va bitimlarni o‘rganing. Rus yoki o‘zbek tilida savol bering — javob bilan birga hisob-kitobni ham ko‘rishingiz mumkin.",
+          placeholder: "Masalan: 2025-yilda nechta bitim tuzilgan?",
+          hint: "Enter — yuborish · Shift + Enter — yangi qator",
+          thinking: "Reyestr bo‘yicha hisoblayapman",
+          source: "Manba: bitimlar reyestri",
+          evidence: "Ma’lumotlar va hisob-kitob",
+          sql: "SQL so‘rovini ko‘rsatish",
+          query: "So‘rov natijasi",
+          lookup: "Topilgan nomlar",
+          seconds: "s",
+          retry: "Savolni takrorlash",
+          network:
+            "Javob olinmadi. Aloqani tekshiring va savolni qayta yuboring.",
+          diagnostics: "Texnik tafsilotlar",
+          noValue: "Qiymat yo‘q",
+          truncated:
+            "Natijaning bir qismi ko‘rsatilgan. To‘liq ro‘yxat uchun savolni aniqlashtiring.",
+          empty: "Bu so‘rov bo‘yicha qatorlar topilmadi.",
+          deals: "ta bitim",
+          lookupError: "Qidiruv bajarilmadi",
+          queryError: "Hisob-kitob bajarilmadi",
+          emptyReply: "Xizmat javob matnini qaytarmadi.",
+        },
+      };
+      const examples = {
+        ru: [
+          {
+            title: "Динамика торгов",
+            icon: "↗",
+            question: "Сколько сделок было заключено в 2025 году?",
+          },
+          {
+            title: "Участники рынка",
+            icon: "◎",
+            question: "Топ-5 брокеров по количеству сделок в 2025 году",
+          },
+          {
+            title: "Региональная аналитика",
+            icon: "⌖",
+            question: "В каких регионах больше всего сделок?",
+          },
+          {
+            title: "Экспорт",
+            icon: "↗",
+            question:
+              "Сколько экспортных сделок и на какую сумму в долларах было в 2025 году?",
+          },
+        ],
+        uz: [
+          {
+            title: "Savdo dinamikasi",
+            icon: "↗",
+            question: "2025-yilda nechta bitim tuzilgan?",
+          },
+          {
+            title: "Bozor ishtirokchilari",
+            icon: "◎",
+            question:
+              "2025-yilda bitimlar soni bo‘yicha eng faol 5 ta broker qaysilar?",
+          },
+          {
+            title: "Hududlar tahlili",
+            icon: "⌖",
+            question: "Qaysi hududlarda eng ko‘p bitim tuzilgan?",
+          },
+          {
+            title: "Eksport",
+            icon: "↗",
+            question:
+              "2025-yilda nechta eksport bitimi tuzilgan va ularning dollardagi umumiy summasi qancha?",
+          },
+        ],
+      };
+      let language = "ru",
+        busy = false,
+        metadata = null;
+      const history = [],
+        turns = [];
+      const log = document.getElementById("log"),
+        question = document.getElementById("question"),
+        sendButton = document.getElementById("send");
+      const t = (key) => texts[language][key] || key;
+      function node(tag, cls, text) {
+        const el = document.createElement(tag);
+        if (cls) el.className = cls;
+        if (text !== undefined) el.textContent = text;
+        return el;
+      }
+      function formatNumber(value) {
+        return new Intl.NumberFormat(language === "ru" ? "ru-RU" : "uz-UZ", {
+          maximumFractionDigits: 4,
+        }).format(value);
+      }
+      function symbol(className, kind = "↗") {
+        const holder = node("span", className);
+        const svg = document.createElementNS(
+          "http://www.w3.org/2000/svg",
+          "svg",
+        );
+        for (const [key, value] of Object.entries({
+          width: "19",
+          height: "19",
+          viewBox: "0 0 24 24",
+          fill: "none",
+          stroke: "currentColor",
+          "stroke-width": "1.6",
+          "aria-hidden": "true",
+        }))
+          svg.setAttribute(key, value);
+        const path = document.createElementNS(svg.namespaceURI, "path");
+        const paths = {
+          "↗": "M4 19V5m0 14h16M8 14l4-5 4 3 4-7",
+          "◎": "M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6m-5 8v-2a5 5 0 0 1 10 0v2m3-14a3 3 0 0 1 0 6m1 3a5 5 0 0 1 4 5",
+          "⌖": "M12 22s7-7 7-13A7 7 0 0 0 5 9c0 6 7 13 7 13m0-10a3 3 0 1 0 0-6 3 3 0 0 0 0 6",
+        };
+        path.setAttribute("d", paths[kind] || paths["↗"]);
+        svg.append(path);
+        holder.append(svg);
+        return holder;
+      }
+      function formatDate(value) {
+        return value ? value.split("-").reverse().join(".") : "—";
+      }
+      function setLanguage(value) {
+        language = value;
+        document.documentElement.lang = value;
+        document
+          .querySelectorAll("[data-i18n]")
+          .forEach((el) => (el.textContent = t(el.dataset.i18n)));
+        document
+          .querySelectorAll("[data-language]")
+          .forEach((el) =>
+            el.setAttribute(
+              "aria-pressed",
+              String(el.dataset.language === value),
+            ),
+          );
+        question.placeholder = t("placeholder");
+        question.setAttribute(
+          "aria-label",
+          value === "ru" ? "Ваш вопрос" : "Savolingiz",
+        );
+        sendButton.setAttribute(
+          "aria-label",
+          value === "ru" ? "Отправить вопрос" : "Savolni yuborish",
+        );
+        document
+          .getElementById("mobileClear")
+          .setAttribute("aria-label", t("newChat"));
+        renderExamples();
+        renderMetadata();
+        turns.forEach((turn) => {
+          if (turn.result) renderAnswer(turn);
+        });
+      }
+      function renderExamples() {
+        const container = document.getElementById("examples"),
+          side = document.getElementById("sideExamples");
+        container.replaceChildren();
+        side.replaceChildren();
+        examples[language].forEach((item) => {
+          const button = node("button", "example");
+          button.type = "button";
+          button.append(symbol("example-icon", item.icon));
+          const content = node("span");
+          content.append(
+            node("strong", "", item.title),
+            node("span", "", item.question),
+          );
+          button.append(content);
+          button.onclick = () => send(item.question);
+          container.append(button);
+          const small = node("button", "side-example", item.question);
+          small.type = "button";
+          small.onclick = () => send(item.question);
+          side.append(small);
+        });
+      }
+      function renderMetadata() {
+        const ready = metadata && metadata.ok;
+        document
+          .getElementById("status")
+          .classList.toggle("ready", Boolean(ready));
+        document.getElementById("statusText").textContent = t(
+          metadata === null ? "checking" : ready ? "ready" : "unavailable",
+        );
+        document.getElementById("dealCount").textContent = ready
+          ? formatNumber(metadata.deals) + " " + t("deals")
+          : "—";
+        document.getElementById("dataPeriod").textContent = ready
+          ? formatDate(metadata.date_from) +
+            " — " +
+            formatDate(metadata.date_to)
+          : "";
+      }
+      // Никакого HTML от модели: все фрагменты создаются через textContent.
+      function inline(parent, text) {
+        const pattern = /(\*\*([^*\n]+)\*\*|`([^`\n]+)`)/g;
+        let start = 0;
+        for (const match of text.matchAll(pattern)) {
+          parent.append(
+            document.createTextNode(text.slice(start, match.index)),
+          );
+          parent.append(
+            node(match[2] ? "strong" : "code", "", match[2] || match[3]),
+          );
+          start = match.index + match[0].length;
+        }
+        parent.append(document.createTextNode(text.slice(start)));
+      }
+      function richText(parent, text) {
+        const lines = text.replace(/\r/g, "").split("\n");
+        let i = 0;
+        while (i < lines.length) {
+          if (!lines[i].trim()) {
+            i++;
+            continue;
+          }
+          if (lines[i].trim().startsWith("```")) {
+            const block = [];
+            i++;
+            while (i < lines.length && !lines[i].trim().startsWith("```"))
+              block.push(lines[i++]);
+            parent.append(node("pre", "", block.join("\n")));
+            i++;
+            continue;
+          }
+          if (
+            lines[i].includes("|") &&
+            i + 1 < lines.length &&
+            /^\s*\|?\s*:?-{3,}/.test(lines[i + 1])
+          ) {
+            const cells = (line) =>
+              line
+                .trim()
+                .replace(/^\|/, "")
+                .replace(/\|$/, "")
+                .split("|")
+                .map((x) => x.trim());
+            const headings = cells(lines[i]);
+            i += 2;
+            const rows = [];
+            while (
+              i < lines.length &&
+              lines[i].includes("|") &&
+              lines[i].trim()
+            )
+              rows.push(cells(lines[i++]));
+            parent.append(makeTable(headings, rows, false));
+            continue;
+          }
+          const ordered = /^\s*\d+[.)]\s+/.test(lines[i]),
+            unordered = /^\s*[-*]\s+/.test(lines[i]);
+          if (ordered || unordered) {
+            const list = node(ordered ? "ol" : "ul"),
+              re = ordered ? /^\s*\d+[.)]\s+/ : /^\s*[-*]\s+/;
+            while (i < lines.length && re.test(lines[i])) {
+              const li = node("li");
+              inline(li, lines[i++].replace(re, ""));
+              list.append(li);
+            }
+            parent.append(list);
+            continue;
+          }
+          const p = node("p"),
+            parts = [];
+          while (
+            i < lines.length &&
+            lines[i].trim() &&
+            !/^\s*(\d+[.)]|[-*])\s+/.test(lines[i])
+          )
+            parts.push(lines[i++]);
+          inline(p, parts.join("\n"));
+          p.style.whiteSpace = "pre-line";
+          parent.append(p);
+        }
+      }
+      const columns = {
+        cnt: ["Количество", "Soni"],
+        n: ["Количество", "Soni"],
+        count: ["Количество", "Soni"],
+        deal_count: ["Количество сделок", "Bitimlar soni"],
+        total_deals: ["Количество сделок", "Bitimlar soni"],
+        "COUNT(*)": ["Количество", "Soni"],
+        broker_code: ["Код брокера", "Broker kodi"],
+        broker: ["Брокер", "Broker"],
+        name: ["Наименование", "Nomi"],
+        region: ["Регион", "Hudud"],
+        status: ["Состояние сделки", "Bitim holati"],
+        amount: ["Сумма в валюте контракта", "Shartnoma valyutasidagi summa"],
+        amount_uzs: ["Сумма, сум", "Summa, so‘m"],
+        amount_usd: ["Сумма, USD", "Summa, USD"],
+        total_uzs: ["Сумма, сум", "Summa, so‘m"],
+        total_usd: ["Сумма, USD", "Summa, USD"],
+        seller_name: ["Продавец", "Sotuvchi"],
+        buyer_name: ["Покупатель", "Xaridor"],
+        seller_broker_name: ["Брокер продавца", "Sotuvchi brokeri"],
+        buyer_broker_name: ["Брокер покупателя", "Xaridor brokeri"],
+        currency: ["Валюта", "Valyuta"],
+        unit: ["Единица измерения", "O‘lchov birligi"],
+        volume: ["Объём", "Hajm"],
+        product_name: ["Товар", "Tovar"],
+        unit_price: ["Цена за единицу", "Birlik narxi"],
+        deal_date: ["Дата сделки", "Bitim sanasi"],
+        deal_id: ["Номер сделки", "Bitim raqami"],
+      };
+      function columnLabel(value) {
+        return columns[value]
+          ? columns[value][language === "ru" ? 0 : 1]
+          : value.replaceAll("_", " ");
+      }
+      function cellValue(value, column) {
+        if (value === null) return t("noValue");
+        if (
+          typeof value === "string" &&
+          /сумма|sum_money|sum_uzs|amount|total|summa/i.test(column) &&
+          /^-?\d+(\.\d+)?$/.test(value)
+        ) {
+          const [integer, fraction] = value.split(".");
+          return (
+            integer.replace(/\B(?=(\d{3})+(?!\d))/g, "\u00a0") +
+            (fraction === undefined
+              ? ""
+              : (language === "ru" ? "," : ".") + fraction)
+          );
+        }
+        if (
+          typeof value === "number" &&
+          !/(^|_)(id|inn|code|no|year)(_|$)|номер|инн|код|год/i.test(column)
+        )
+          return formatNumber(value);
+        return String(value);
+      }
+      function makeTable(headings, rows, numeric = true) {
+        const wrap = node("div", "table-wrap"),
+          table = node("table"),
+          head = node("thead"),
+          header = node("tr");
+        headings.forEach((col) =>
+          header.append(node("th", "", numeric ? columnLabel(col) : col)),
+        );
+        head.append(header);
+        table.append(head);
+        const body = node("tbody");
+        rows.forEach((row) => {
+          const tr = node("tr");
+          row.forEach((value, index) => {
+            const td = node("td");
+            if (numeric)
+              td.textContent = cellValue(value, headings[index] || "");
+            else inline(td, String(value));
+            tr.append(td);
+          });
+          body.append(tr);
+        });
+        table.append(body);
+        wrap.append(table);
+        return wrap;
+      }
+      function evidenceNode(evidence) {
+        if (!evidence || !evidence.length) return null;
+        const details = node("details", "evidence");
+        details.append(node("summary", "", t("evidence")));
+        const content = node("div", "evidence-content");
+        evidence.forEach((item, index) => {
+          const step = node("div", "evidence-step");
+          step.append(
+            node(
+              "div",
+              "evidence-title",
+              String(index + 1).padStart(2, "0") +
+                " · " +
+                t(item.tool === "run_sql" ? "query" : "lookup"),
+            ),
+          );
+          if (item.error)
+            step.append(
+              node(
+                "p",
+                "error-label",
+                t(item.tool === "run_sql" ? "queryError" : "lookupError"),
+              ),
+            );
+          else if (item.tool === "run_sql") {
+            if (item.rows && item.rows.length)
+              step.append(makeTable(item.columns, item.rows));
+            else step.append(node("p", "", t("empty")));
+            if (item.truncated)
+              step.append(node("div", "table-caption", t("truncated")));
+          } else {
+            if (item.args && item.args.text)
+              step.append(node("div", "", item.args.text));
+            const list = node("ul", "lookup-values");
+            (item.matches || []).forEach((match) =>
+              list.append(node("li", "", match.value)),
+            );
+            step.append(list);
+          }
+          const technical = node("details", "technical");
+          technical.append(
+            node(
+              "summary",
+              "",
+              t(item.tool === "run_sql" ? "sql" : "diagnostics"),
+            ),
+          );
+          technical.append(
+            node(
+              "pre",
+              "",
+              item.tool === "run_sql"
+                ? item.sql
+                : JSON.stringify(item.args, null, 2),
+            ),
+          );
+          if (item.error) technical.append(node("pre", "", item.error));
+          step.append(technical);
+          content.append(step);
+        });
+        details.append(content);
+        return details;
+      }
+      function renderAnswer(turn) {
+        const result = turn.result,
+          card = turn.card;
+        card.replaceChildren();
+        card.classList.toggle("error-card", Boolean(result.error_code));
+        const body = node("div", "answer-body");
+        richText(body, result.answer || t("emptyReply"));
+        card.append(body);
+        if (result.error_code) {
+          const retry = node("button", "retry", t("retry"));
+          retry.type = "button";
+          retry.onclick = () => send(turn.question);
+          card.append(retry);
+        }
+        const footer = node("div", "answer-footer");
+        if (
+          !result.error_code &&
+          (result.evidence || []).some((item) => !item.error)
+        )
+          footer.append(node("span", "source-label", t("source")));
+        if (result.seconds !== undefined)
+          footer.append(
+            node(
+              "span",
+              "answer-time",
+              formatNumber(result.seconds) + " " + t("seconds"),
+            ),
+          );
+        card.append(footer);
+        const evidence = evidenceNode(result.evidence);
+        if (evidence) card.append(evidence);
+        if (result.error_code && result.error) {
+          const diagnostic = node("details", "evidence");
+          diagnostic.append(
+            node("summary", "", t("diagnostics")),
+            node("pre", "", result.error),
+          );
+          card.append(diagnostic);
+        }
+      }
+      function scrollToTurn(turn) {
+        turn.container.scrollIntoView({ block: "end", behavior: "smooth" });
+      }
+      function resizeInput() {
+        question.style.height = "42px";
+        question.style.height = Math.min(question.scrollHeight, 160) + "px";
+      }
+      async function send(text) {
+        text = (typeof text === "string" ? text : question.value).trim();
+        if (!text || busy) return;
+        busy = true;
+        sendButton.disabled = true;
+        document
+          .querySelectorAll(".new-chat,.mobile-clear")
+          .forEach((button) => (button.disabled = true));
+        question.value = "";
+        resizeInput();
+        document.getElementById("welcome").hidden = true;
+        const user = node("div", "turn user-row");
+        user.append(node("div", "user-message", text));
+        log.append(user);
+        const container = node("article", "turn"),
+          heading = node("div", "assistant-heading");
+        heading.append(symbol("avatar"), node("span", "", "Birja AI"));
+        container.append(heading);
+        const card = node("div", "answer-card"),
+          body = node("div", "answer-body"),
+          loading = node("div", "loading");
+        loading.setAttribute("role", "status");
+        const loadingText = node("span", "", t("thinking"));
+        loading.append(node("span", "spinner"), loadingText);
+        body.append(loading);
+        card.append(body);
+        container.append(card);
+        log.append(container);
+        const turn = { question: text, container, card };
+        turns.push(turn);
+        scrollToTurn(turn);
+        const started = Date.now(),
+          ticker = setInterval(() => {
+            loadingText.textContent =
+              t("thinking") +
+              " · " +
+              Math.floor((Date.now() - started) / 1000) +
+              " " +
+              t("seconds");
+          }, 1000);
+        const controller = new AbortController(),
+          timeout = setTimeout(() => controller.abort(), 85000);
+        try {
+          const response = await fetch("/api/ask", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              question: text,
+              history: history.slice(-6),
+            }),
+            signal: controller.signal,
+          });
+          const result = await response.json();
+          if (!response.ok && !result.answer) result.answer = t("network");
+          if (!response.ok && !result.error_code)
+            result.error_code = "request_error";
+          turn.result = result;
+          if (response.ok && !result.error_code)
+            history.push(
+              { role: "user", content: text },
+              { role: "assistant", content: result.answer || "" },
+            );
+        } catch (error) {
+          turn.result = { answer: t("network"), error_code: "network" };
+        } finally {
+          clearInterval(ticker);
+          clearTimeout(timeout);
+          busy = false;
+          sendButton.disabled = false;
+          document
+            .querySelectorAll(".new-chat,.mobile-clear")
+            .forEach((button) => (button.disabled = false));
+          renderAnswer(turn);
+          question.focus({ preventScroll: true });
+          scrollToTurn(turn);
+        }
+      }
+      function newChat() {
+        if (busy) return;
+        history.length = 0;
+        turns.length = 0;
+        log.replaceChildren();
+        document.getElementById("welcome").hidden = false;
+        question.value = "";
+        resizeInput();
+        question.focus();
+        window.scrollTo({ top: 0 });
+      }
+      document.getElementById("form").addEventListener("submit", (event) => {
+        event.preventDefault();
+        send();
+      });
+      question.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+          event.preventDefault();
+          send();
+        }
+      });
+      question.addEventListener("input", resizeInput);
+      document
+        .querySelectorAll("[data-language]")
+        .forEach(
+          (button) =>
+            (button.onclick = () => setLanguage(button.dataset.language)),
+        );
+      document.getElementById("newChat").onclick = newChat;
+      document.getElementById("mobileClear").onclick = newChat;
+      setLanguage("ru");
+      fetch("/api/health")
+        .then((response) => response.json())
+        .then((result) => {
+          metadata = result;
+          renderMetadata();
+        })
+        .catch(() => {
+          metadata = { ok: false };
+          renderMetadata();
+        });
+    </script>
+  </body>
 </html>

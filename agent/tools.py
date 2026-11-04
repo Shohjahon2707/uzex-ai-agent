@@ -4,6 +4,7 @@ import os
 import re
 import sqlite3
 import time
+from decimal import Decimal
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -18,12 +19,53 @@ def _lower(s):
     return s.lower() if isinstance(s, str) else s
 
 
+class MoneySum:
+    """Точная сумма исходных денежных значений; результат — десятичная строка."""
+    def __init__(self):
+        self.total = Decimal(0)
+        self.seen = False
+
+    def step(self, value):
+        if value is not None:
+            self.total += Decimal(str(value))
+            self.seen = True
+
+    def finalize(self):
+        return format(self.total, "f") if self.seen else None
+
+
+class UzsSum(MoneySum):
+    def __init__(self):
+        super().__init__()
+        self.missing = False
+
+    def step(self, amount, rate, is_usd):
+        if amount is None or is_usd is None or (is_usd and rate is None):
+            self.missing = True
+            return
+        value = Decimal(str(amount))
+        if is_usd:
+            value *= Decimal(str(rate))
+        super().step(value)
+
+    def finalize(self):
+        return None if self.missing else super().finalize()
+
+
+def _decimal_compare(left, right):
+    left, right = Decimal(left), Decimal(right)
+    return (left > right) - (left < right)
+
+
 def connect():
     uri = DB_PATH.resolve().as_uri() + "?mode=ro"
     conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
     conn.execute("PRAGMA query_only = ON")
     # Встроенный lower() в SQLite не понимает кириллицу — подменяем на Unicode-версию.
     conn.create_function("lower", 1, _lower, deterministic=True)
+    conn.create_aggregate("sum_money", 1, MoneySum)
+    conn.create_aggregate("sum_uzs", 3, UzsSum)
+    conn.create_collation("decimal", _decimal_compare)
     return conn
 
 
