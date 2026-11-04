@@ -33,7 +33,7 @@ def _jsonable(v):
     return v
 
 
-def run_sql(query):
+def run_sql(query, deadline=None):
     q = (query or "").strip().rstrip(";").strip()
     if not q:
         return {"error": "Пустой запрос."}
@@ -44,9 +44,11 @@ def run_sql(query):
     if _FORBIDDEN.search(q):
         return {"error": "Запрещённое ключевое слово в запросе."}
 
+    deadline = min(deadline, time.monotonic() + QUERY_TIMEOUT) if deadline is not None else time.monotonic() + QUERY_TIMEOUT
+    if time.monotonic() >= deadline:
+        return {"error": "Исчерпан бюджет времени на SQL-запрос."}
     conn = connect()
-    deadline = time.time() + QUERY_TIMEOUT
-    conn.set_progress_handler(lambda: 1 if time.time() > deadline else 0, 200_000)
+    conn.set_progress_handler(lambda: 1 if time.monotonic() > deadline else 0, 10_000)
     try:
         cur = conn.execute(q)
         cols = [d[0] for d in cur.description] if cur.description else []
@@ -54,7 +56,7 @@ def run_sql(query):
     except sqlite3.Error as e:
         msg = str(e)
         if "interrupted" in msg:
-            msg = f"Запрос слишком долгий (> {QUERY_TIMEOUT} c). Упрости, добавь фильтр по дате/контракту."
+            msg = "Исчерпан бюджет времени на запрос. Упрости SQL, добавь фильтр по дате/контракту."
         return {"error": msg}
     finally:
         conn.close()
@@ -80,8 +82,11 @@ def _norm(s):
     return re.sub(r"[^\w\s]+", " ", s)
 
 
-def lookup(table, column, text, limit=15):
+def lookup(table, column, text, limit=15, deadline=None):
     """Ищет в колонке реальные значения, похожие на text (регистр и апострофы не важны)."""
+    deadline = min(deadline, time.monotonic() + QUERY_TIMEOUT) if deadline is not None else time.monotonic() + QUERY_TIMEOUT
+    if time.monotonic() >= deadline:
+        return {"error": "Исчерпан бюджет времени на поиск."}
     conn = connect()
     try:
         tables = {r[0] for r in conn.execute(
@@ -94,8 +99,7 @@ def lookup(table, column, text, limit=15):
         src = "contracts" if (table == "deals_v" and column in (
             "product_name", "product_group", "product_category", "industry", "brand", "grade")
             and column in [r[1] for r in conn.execute('PRAGMA table_info("contracts")')]) else table
-        deadline = time.time() + QUERY_TIMEOUT
-        conn.set_progress_handler(lambda: 1 if time.time() > deadline else 0, 200_000)
+        conn.set_progress_handler(lambda: 1 if time.monotonic() > deadline else 0, 10_000)
         rows = conn.execute(
             f'SELECT "{column}", COUNT(*) FROM "{src}" WHERE "{column}" IS NOT NULL GROUP BY "{column}"').fetchall()
     except sqlite3.Error as e:
@@ -112,6 +116,8 @@ def lookup(table, column, text, limit=15):
         mode = "fuzzy"
         scored = []
         for n, v, c in normed[:30000]:
+            if time.monotonic() >= deadline:
+                return {"error": "Исчерпан бюджет времени на нечёткий поиск."}
             vt = n.split()
             if not vt:
                 continue
@@ -141,12 +147,12 @@ def lookup(table, column, text, limit=15):
     return out
 
 
-def dispatch(name, args):
+def dispatch(name, args, deadline=None):
     try:
         if name == "run_sql":
-            return run_sql(args.get("query", ""))
+            return run_sql(args.get("query", ""), deadline=deadline)
         if name == "lookup":
-            return lookup(args.get("table", ""), args.get("column", ""), args.get("text", ""))
+            return lookup(args.get("table", ""), args.get("column", ""), args.get("text", ""), deadline=deadline)
     except Exception as e:  # не роняем весь ответ из-за ошибки инструмента
         return {"error": f"{type(e).__name__}: {e}"}
     return {"error": f"Неизвестный инструмент {name}"}

@@ -94,9 +94,14 @@ async function send() {
       body: JSON.stringify({ question: text, history: history.slice(-6) }) });
     const j = await r.json();
     wait.textContent = j.answer || j.error || '—';
+    if (j.error_code && j.error) {
+      const d = document.createElement('details');
+      const s = document.createElement('summary'); s.textContent = 'Диагностика / Diagnostika'; d.appendChild(s);
+      const p = document.createElement('pre'); p.textContent = j.error; d.appendChild(p); wait.appendChild(d);
+    }
     const ev = evidenceNode(j.evidence); if (ev) wait.appendChild(ev);
     if (j.seconds != null) { const m = document.createElement('div'); m.className='meta'; m.textContent = j.seconds + ' c'; wait.appendChild(m); }
-    history.push({role:'user', content:text}, {role:'assistant', content:j.answer || ''});
+    if (r.ok && !j.error_code) history.push({role:'user', content:text}, {role:'assistant', content:j.answer || ''});
   } catch (e) {
     wait.textContent = 'Ошибка сети / Tarmoq xatosi: ' + e;
   }

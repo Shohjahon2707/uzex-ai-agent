@@ -9,7 +9,7 @@ def _load_env():
     env = BASE_DIR / ".env"
     if not env.exists():
         return
-    for line in env.read_text(encoding="utf-8").splitlines():
+    for line in env.read_text(encoding="utf-8-sig").splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
@@ -23,7 +23,7 @@ SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-only-insecure-key-change-o
 DEBUG = os.environ.get("DEBUG", "1") == "1"
 ALLOWED_HOSTS = ["*"]
 
-INSTALLED_APPS = []
+INSTALLED_APPS = ["agent"]
 MIDDLEWARE = ["django.middleware.common.CommonMiddleware"]
 ROOT_URLCONF = "config.urls"
 WSGI_APPLICATION = "config.wsgi.application"

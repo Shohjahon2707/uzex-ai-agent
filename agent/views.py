@@ -1,5 +1,6 @@
 import json
 
+from django.conf import settings
 from django.http import JsonResponse
 from django.shortcuts import render
 from django.views.decorators.csrf import csrf_exempt
@@ -29,8 +30,19 @@ def ask(request):
         payload = json.loads(request.body or b"{}")
     except ValueError:
         return JsonResponse({"error": "bad json"}, status=400)
-    question = (payload.get("question") or "").strip()
+    if not isinstance(payload, dict):
+        return JsonResponse({"error": "expected JSON object"}, status=400)
+    question = payload.get("question", "")
+    if not isinstance(question, str):
+        return JsonResponse({"error": "question must be a string"}, status=400)
+    question = question.strip()
     if not question:
         return JsonResponse({"error": "empty question"}, status=400)
-    result = service.answer_question(question[:1500], payload.get("history") or [])
-    return JsonResponse(result, json_dumps_params={"ensure_ascii": False})
+    history = payload.get("history") or []
+    if not isinstance(history, list) or any(not isinstance(item, dict) for item in history):
+        return JsonResponse({"error": "history must be a list of messages"}, status=400)
+    result = service.answer_question(question[:1500], history)
+    failed = bool(result.get("error_code"))
+    if not settings.DEBUG:
+        result.pop("error", None)
+    return JsonResponse(result, status=502 if failed else 200, json_dumps_params={"ensure_ascii": False})
