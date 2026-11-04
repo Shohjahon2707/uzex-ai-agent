@@ -20,6 +20,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        self.server.auth_headers.append(self.headers.get("Authorization"))
         self.server.requests.append((self.path, payload))
         status, body = self.server.replies.popleft()
         data = json.dumps(body).encode()
@@ -40,6 +41,7 @@ class SDKTests(SimpleTestCase):
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.server.replies = deque()
         self.server.requests = []
+        self.server.auth_headers = []
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.env = patch.dict(os.environ, {
@@ -87,3 +89,25 @@ class SDKTests(SimpleTestCase):
         self.assertEqual(path, "/openai/v1/chat/completions")
         self.assertEqual(payload["model"], "test-model")
         self.assertEqual(json.loads(payload["messages"][-1]["content"])["rows"], [[2]])
+
+    def test_rotation_is_per_question_not_per_model_call(self):
+        keys = {f"LLM_API_KEY_{i}": f"sdk-private-slot-{i}" for i in range(1,6)}
+        for index in range(6):
+            self.server.replies.extend([
+                (200, completion({"content": None, "tool_calls": [{"id": f"call{index}", "type": "function", "function": {
+                    "name": "run_sql", "arguments": '{"query":"SELECT COUNT(*) FROM deals"}',
+                }}]})),
+                (200, completion({"content": "В реестре 3 сделки."})),
+            ])
+        with patch.dict(os.environ, keys), patch("agent.tools.dispatch", return_value={"columns": ["cnt"], "rows": [[3]], "row_count": 1}):
+            for _ in range(6):
+                self.assertNotIn("error_code", service.answer_question("Сколько сделок?"))
+        self.assertEqual(self.server.auth_headers, [f"Bearer sdk-private-slot-{index}" for index in [1,1,2,2,3,3,4,4,5,5,1,1]])
+
+    def test_rate_limit_does_not_probe_remaining_keys(self):
+        keys = {f"LLM_API_KEY_{i}": f"sdk-quota-slot-{i}" for i in range(1,6)}
+        self.server.replies.extend([(429, {"error": {"message": "Rate limit reached", "code": "rate_limit_exceeded"}})] * 2)
+        with patch.dict(os.environ, keys):
+            for _ in range(2):
+                self.assertEqual(service.answer_question("Сколько сделок?")["error_code"], "rate_limit")
+        self.assertEqual(self.server.auth_headers, ["Bearer sdk-quota-slot-1", "Bearer sdk-quota-slot-2"])

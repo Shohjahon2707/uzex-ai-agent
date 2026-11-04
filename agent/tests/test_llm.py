@@ -34,7 +34,7 @@ class ConfigTests(SimpleTestCase):
         with patch.dict(os.environ, {"GROQ_API_KEY": "fake-test-key"}, clear=True):
             config = llm.get_config()
             self.assertEqual(config.base_url, "https://api.groq.com/openai/v1")
-            self.assertEqual(config.model, "openai/gpt-oss-120b")
+            self.assertEqual(config.model, "openai/gpt-oss-20b")
             self.assertNotIn("fake-test-key", repr(config))
 
     def test_rejects_full_completion_path(self):

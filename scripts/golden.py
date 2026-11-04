@@ -56,6 +56,7 @@ def main():
     path = sys.argv[1] if len(sys.argv) > 1 else "scripts/golden.csv"
     base = sys.argv[2] if len(sys.argv) > 2 else "http://127.0.0.1:8000"
     passed = total = 0
+    blocked = False
     with open(path, encoding="utf-8-sig", newline="") as f:
         for row in csv.DictReader(f):
             q = (row.get("question") or "").strip()
@@ -69,6 +70,12 @@ def main():
             except Exception as e:  # noqa: BLE001
                 ans, res = f"ERROR {e}", {}
             dt = time.time() - t
+            if res.get("error_code") == "rate_limit":
+                total -= 1
+                blocked = True
+                print(f"BLOCKED  {dt:5.1f}s  {q}\n      {ans}")
+                print("Остановлено на квоте провайдера. Остальные вопросы не проверялись; это не ошибки точности.")
+                break
             mode = (row.get("mode") or "contains").strip()
             if mode == "nodata":
                 ok = any(w in ans.lower() for w in NODATA)
@@ -83,7 +90,7 @@ def main():
                     if e.get("sql"):
                         print(f"      SQL: {e['sql'][:300]}")
     print(f"\n{passed}/{total} прошли")
-    return int(passed != total)
+    return 2 if blocked else int(passed != total)
 
 
 if __name__ == "__main__":
