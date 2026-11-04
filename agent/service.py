@@ -4,7 +4,7 @@ import logging
 import time
 
 from . import tools
-from .llm import create_client, describe_error, get_config
+from .llm import create_client, describe_error, get_config, next_config
 from .presentation import format_answer
 from .prompts import build_system_prompt
 
@@ -54,7 +54,9 @@ _use_temperature = True
 
 
 def get_client():
-    return create_client()
+    config = next_config()
+    logger.info("LLM question: using %s (value hidden)", config.key_name)
+    return create_client(config=config)
 
 
 def _chat(client, messages, with_tools=True, deadline=None):

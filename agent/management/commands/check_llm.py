@@ -3,7 +3,7 @@ import json
 
 from django.core.management.base import BaseCommand, CommandError
 
-from agent.llm import create_client, describe_error, get_config
+from agent.llm import create_client, describe_error, get_config, key_pool
 
 
 CHECK_TOOL = {
@@ -21,11 +21,18 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--list-models", action="store_true", help="Получить список моделей у провайдера")
+        parser.add_argument("--key", type=int, default=1, help="Номер ключа в настроенном пуле, начиная с 1")
+        parser.add_argument("--show-rotation", action="store_true", help="Показать порядок ключей без запросов к API")
 
     def handle(self, *args, **options):
         try:
-            config = get_config()
-            self.stdout.write(f"API: {config.base_url}\nМодель: {config.model}\nКлюч: задан (скрыт)")
+            config = get_config(key_index=options["key"] - 1)
+            self.stdout.write(f"API: {config.base_url}\nМодель: {config.model}\nКлюч: {config.key_name} (скрыт)")
+            if options["show_rotation"]:
+                labels = [name for name, _ in key_pool()]
+                self.stdout.write("Порядок: " + " → ".join(labels + labels))
+                self.stdout.write("Это локальная проверка настроек без обращения к провайдеру.")
+                return
             with create_client(timeout=20, config=config) as client:
                 if options["list_models"]:
                     for model in client.models.list():
