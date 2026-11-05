@@ -45,6 +45,8 @@ class SDKTests(SimpleTestCase):
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.env = patch.dict(os.environ, {
+            **{name: "" for name in os.environ if name.startswith("LLM_API_KEY_")},
+            "LLM_PROVIDER": "openai-compatible",
             "LLM_API_KEY": "fake-key-for-sdk-test",
             "LLM_BASE_URL": f"http://127.0.0.1:{self.server.server_port}/openai/v1",
             "LLM_MODEL": "test-model",
@@ -111,3 +113,26 @@ class SDKTests(SimpleTestCase):
             for _ in range(2):
                 self.assertEqual(service.answer_question("Сколько сделок?")["error_code"], "rate_limit")
         self.assertEqual(self.server.auth_headers, ["Bearer sdk-quota-slot-1", "Bearer sdk-quota-slot-2"])
+
+    def test_deepseek_tool_cycle_preserves_protocol_field_and_isolates_credentials(self):
+        self.server.replies.extend([
+            (200, completion({"content": None, "reasoning_content": "test protocol field", "tool_calls": [
+                {"id": "deepseek-call", "type": "function", "function": {
+                    "name": "run_sql", "arguments": '{"query":"SELECT COUNT(*) FROM deals"}',
+                }}]})),
+            (200, completion({"content": "1367"})),
+        ])
+        env = {"LLM_PROVIDER": "deepseek", "DEEPSEEK_API_KEY": "sdk-deepseek-private-value",
+               "DEEPSEEK_BASE_URL": f"http://127.0.0.1:{self.server.server_port}/v1",
+               "DEEPSEEK_MODEL": "deepseek-v4-pro", "LLM_API_KEY_1": "old-groq-test-value"}
+        with patch.dict(os.environ, env), patch("agent.tools.dispatch", return_value={"columns": ["cnt"], "rows": [[1367]], "row_count": 1}):
+            result = service.answer_question("Сколько экспортных сделок в 2025 году?")
+        self.assertNotIn("error_code", result)
+        self.assertEqual(result["answer"], "1 367")
+        self.assertEqual(self.server.auth_headers, ["Bearer sdk-deepseek-private-value"] * 2)
+        for path, payload in self.server.requests:
+            self.assertEqual(path, "/v1/chat/completions")
+            self.assertEqual(payload["model"], "deepseek-v4-pro")
+        messages = self.server.requests[1][1]["messages"]
+        self.assertEqual(messages[-2]["reasoning_content"], "test protocol field")
+        self.assertNotIn("test protocol field", str(result))

@@ -23,8 +23,20 @@ _rotation_signature = ()
 _rotation_position = 0
 
 
+def provider():
+    value = os.environ.get("LLM_PROVIDER", "openai-compatible").strip().lower()
+    if value not in {"", "openai-compatible", "openai", "groq", "deepseek"}:
+        raise ConfigurationError("Неизвестный LLM_PROVIDER. Используй deepseek или openai-compatible.")
+    return value or "openai-compatible"
+
+
 def key_pool():
     """Нумерованные ключи имеют приоритет; дубликаты не создают новые слоты."""
+    if provider() == "deepseek":
+        value = os.environ.get("DEEPSEEK_API_KEY", "").strip()
+        if not value or value.startswith("your_"):
+            raise ConfigurationError("Не задан DEEPSEEK_API_KEY. Выполни python manage.py configure_deepseek и перезапусти сервер.")
+        return [("DEEPSEEK_API_KEY", value)]
     numbered = sorted((int(match[1]), name, value.strip()) for name, value in os.environ.items()
                       if (match := re.fullmatch(r"LLM_API_KEY_([1-9]\d*)", name)) and value.strip())
     candidates = [(name, value) for _, name, value in numbered]
@@ -51,17 +63,18 @@ def get_config(key_index=0):
     if key_index < 0 or key_index >= len(pool):
         raise ConfigurationError(f"Номер ключа должен быть от 1 до {len(pool)}.")
     key_name, key = pool[key_index]
-    base_url = os.environ.get("LLM_BASE_URL", "").strip()
+    deepseek = provider() == "deepseek"
+    base_url = os.environ.get("DEEPSEEK_BASE_URL" if deepseek else "LLM_BASE_URL", "").strip()
     if not base_url:
-        base_url = "https://api.groq.com/openai/v1" if key_name == "GROQ_API_KEY" or key.startswith("gsk_") else "https://api.openai.com/v1"
+        base_url = "https://api.deepseek.com/v1" if deepseek else "https://api.groq.com/openai/v1" if key_name == "GROQ_API_KEY" or key.startswith("gsk_") else "https://api.openai.com/v1"
     parsed = urlsplit(base_url)
     if (parsed.scheme not in {"http", "https"} or not parsed.hostname
             or parsed.username or parsed.password or parsed.query or parsed.fragment):
         raise ConfigurationError("LLM_BASE_URL должен быть адресом API без ключей и параметров в URL.")
     if parsed.path.rstrip("/").endswith("/chat/completions"):
         raise ConfigurationError("Убери /chat/completions из LLM_BASE_URL: SDK добавляет этот путь сам.")
-    default_model = "openai/gpt-oss-20b" if parsed.hostname == "api.groq.com" else "gpt-4.1-mini"
-    model = os.environ.get("LLM_MODEL", "").strip() or default_model
+    default_model = "deepseek-v4-pro" if deepseek else "openai/gpt-oss-20b" if parsed.hostname == "api.groq.com" else "gpt-4.1-mini"
+    model = os.environ.get("DEEPSEEK_MODEL" if deepseek else "LLM_MODEL", "").strip() or default_model
     return LLMConfig(key, base_url.rstrip("/"), model, key_name)
 
 
@@ -90,7 +103,7 @@ def redact(text):
     text = str(text)
     values = set()
     for name, value in os.environ.items():
-        if name not in {"LLM_API_KEY", "GROQ_API_KEY"} and not re.fullmatch(r"LLM_API_KEY_[1-9]\d*", name):
+        if name not in {"LLM_API_KEY", "GROQ_API_KEY", "DEEPSEEK_API_KEY"} and not re.fullmatch(r"LLM_API_KEY_[1-9]\d*", name):
             continue
         key = value.strip()
         if key:
@@ -98,6 +111,20 @@ def redact(text):
     for key in sorted(values, key=len, reverse=True):
         text = text.replace(key, "[REDACTED]")
     return re.sub(r"(?:gsk_|sk-|AIza|AQ\.)[A-Za-z0-9_.-]+", "[REDACTED]", text)
+
+
+def assistant_tool_message(message):
+    payload = {
+        "role": "assistant", "content": message.content,
+        "tool_calls": [{"id": call.id, "type": "function", "function": {
+            "name": call.function.name, "arguments": call.function.arguments,
+        }} for call in message.tool_calls],
+    }
+    reasoning = getattr(message, "reasoning_content", None)
+    if reasoning is not None and provider() == "deepseek":
+        # Поле протокола thinking-модели нужно вернуть API; в интерфейс/логи оно не попадает.
+        payload["reasoning_content"] = reasoning
+    return payload
 
 
 def describe_error(exc):
@@ -108,11 +135,15 @@ def describe_error(exc):
     body = getattr(exc, "body", None)
     detail = body if body is not None else str(exc)
     detail = redact(f"{type(exc).__name__}: {detail}")[:3000]
+    deepseek = os.environ.get("LLM_PROVIDER", "").strip().lower() == "deepseek"
+    key_setting = "DEEPSEEK_API_KEY" if deepseek else "соответствующую строку LLM_API_KEY"
+    model_settings = "DEEPSEEK_BASE_URL и DEEPSEEK_MODEL" if deepseek else "LLM_BASE_URL и LLM_MODEL"
     messages = {
         400: ("invalid_request", "Провайдер модели отклонил параметры запроса (400). Выполни python manage.py check_llm."),
-        401: ("invalid_api_key", "Провайдер модели не принимает выбранный API-ключ (401). Проверь соответствующую строку LLM_API_KEY в .env и перезапусти сервер."),
+        401: ("invalid_api_key", f"Провайдер модели не принимает выбранный API-ключ (401). Проверь {key_setting} в .env и перезапусти сервер."),
+        402: ("insufficient_balance", "На API-счёте провайдера модели недостаточно средств (402). Проверь API-баланс."),
         403: ("access_denied", "Нет доступа к API модели (403). Проверь разрешения ключа, проект и доступность сервиса в регионе."),
-        404: ("model_not_found", "Не найден адрес API или модель (404). Проверь LLM_BASE_URL и LLM_MODEL; список: python manage.py check_llm --list-models."),
+        404: ("model_not_found", f"Не найден адрес API или модель (404). Проверь {model_settings}; список: python manage.py check_llm --list-models."),
         429: ("rate_limit", "Достигнут лимит запросов или квоты модели (429). Проверь квоту у провайдера или повтори позже."),
     }
     if isinstance(exc, ConfigurationError):

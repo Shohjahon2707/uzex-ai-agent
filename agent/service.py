@@ -5,7 +5,7 @@ import time
 
 from . import tools
 from .conversation import needs_history, relevant_history
-from .llm import create_client, describe_error, get_config, next_config
+from .llm import assistant_tool_message, create_client, describe_error, get_config, next_config
 from .presentation import format_answer
 from .prompts import build_system_prompt
 
@@ -147,13 +147,7 @@ def answer_question(question, history=None):
                     continue
                 return {"answer": format_answer(msg.content or "", evidence), "evidence": evidence,
                         "seconds": round(time.monotonic() - t0, 1)}
-            messages.append({
-                "role": "assistant",
-                "content": msg.content,
-                "tool_calls": [{"id": tc.id, "type": "function",
-                                "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
-                               for tc in msg.tool_calls],
-            })
+            messages.append(assistant_tool_message(msg))
             for tc in msg.tool_calls:
                 try:
                     args = json.loads(tc.function.arguments or "{}")

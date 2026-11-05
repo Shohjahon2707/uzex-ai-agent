@@ -52,7 +52,7 @@ class ConfigTests(SimpleTestCase):
         self.assertNotIn(key, error["detail"])
 
     def test_provider_status_categories(self):
-        for status, code in [(400, "invalid_request"), (403, "access_denied"),
+        for status, code in [(400, "invalid_request"), (402, "insufficient_balance"), (403, "access_denied"),
                              (404, "model_not_found"), (429, "rate_limit"), (503, "provider_unavailable")]:
             with self.subTest(status=status):
                 self.assertEqual(llm.describe_error(ProviderError(status, "test"))["code"], code)

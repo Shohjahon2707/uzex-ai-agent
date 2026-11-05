@@ -18,8 +18,8 @@ pip install -r requirements.txt
 python scripts/build_db.py --data data --out data/birja.db
 #    внимательно прочитай «ОТЧЁТ-ПРОВЕРКА» в конце: количества по годам должны совпасть с README
 
-# 2) ключ LLM
-copy .env.example .env         # Linux/macOS: cp .env.example .env   (и впиши LLM_API_KEY)
+# 2) ключ DeepSeek (ввод скрыт, настройки сохраняются в .env)
+python manage.py configure_deepseek
 
 # 3) запуск
 python manage.py check_llm    # проверка ключа, модели и вызова инструментов
@@ -35,6 +35,23 @@ python scripts/golden.py scripts/golden.csv http://127.0.0.1:8000
 Настройки читаются из `.env` рядом с `manage.py`, а не из `.env.example`.
 После правки `.env` останови сервер (Ctrl+C) и снова запусти `python manage.py runserver`.
 Уже заданные переменные окружения имеют приоритет над `.env`.
+
+По умолчанию пример настроек использует DeepSeek. Для переключения существующего проекта:
+
+```bash
+python manage.py configure_deepseek
+python manage.py check_llm
+```
+
+Первая команда запрашивает ключ скрыто и сохраняет только в локальный `.env`:
+`LLM_PROVIDER=deepseek`, `DEEPSEEK_API_KEY`, `DEEPSEEK_MODEL=deepseek-v4-pro` и
+`DEEPSEEK_BASE_URL=https://api.deepseek.com/v1`. Остальные настройки сохраняются.
+Перезапусти работающий Django после изменения файла. Идентификатор модели взят из настроек пользователя;
+доступность ключа и этой модели у провайдера подтверждает только живой `check_llm`.
+Список моделей: `python manage.py check_llm --list-models`.
+
+В профиле DeepSeek старые `LLM_API_KEY_1…5`, `LLM_BASE_URL` и `LLM_MODEL` Groq не используются.
+Для возврата к прежнему профилю задай `LLM_PROVIDER=openai-compatible`.
 
 Для Groq используются `LLM_API_KEY`, `LLM_BASE_URL=https://api.groq.com/openai/v1`
 и `LLM_MODEL=openai/gpt-oss-20b` (если модель доступна в аккаунте).
@@ -59,6 +76,7 @@ python manage.py check_llm --list-models  # выводит реальные ид
 В локальном `.env` можно заменить одиночную строку `LLM_API_KEY` на:
 
 ```dotenv
+LLM_PROVIDER=openai-compatible
 LLM_API_KEY_1=your_first_key
 LLM_API_KEY_2=your_second_key
 LLM_API_KEY_3=your_third_key
