@@ -50,6 +50,10 @@ python manage.py check_llm
 доступность ключа и этой модели у провайдера подтверждает только живой `check_llm`.
 Список моделей: `python manage.py check_llm --list-models`.
 
+И чат, и проверка подключения используют `tool_choice=auto`: thinking-режим DeepSeek не принимает
+принудительный `required`. Поле протокола `reasoning_content`, если оно возвращено с вызовом
+инструмента, передаётся обратно API без вывода в интерфейс или логи.
+
 В профиле DeepSeek старые `LLM_API_KEY_1…5`, `LLM_BASE_URL` и `LLM_MODEL` Groq не используются.
 Для возврата к прежнему профилю задай `LLM_PROVIDER=openai-compatible`.
 

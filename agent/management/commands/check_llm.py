@@ -40,10 +40,10 @@ class Command(BaseCommand):
                     return
                 messages = [{"role": "user", "content": "Вызови connection_check, затем ответь OK."}]
                 reply = client.chat.completions.create(
-                    model=config.model, messages=messages, tools=[CHECK_TOOL], tool_choice="required",
+                    model=config.model, messages=messages, tools=[CHECK_TOOL], tool_choice="auto",
                 ).choices[0].message
                 if not reply.tool_calls:
-                    raise CommandError("API ответил, но модель не вызвала инструмент. Выбери модель с tool calling.")
+                    raise CommandError("API ответил, но модель не вызвала проверочный инструмент в режиме auto. Повтори проверку или проверь поддержку tool calling у модели.")
                 messages.append(assistant_tool_message(reply))
                 for tc in reply.tool_calls:
                     if tc.function.name != "connection_check":
