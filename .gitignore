@@ -3,6 +3,8 @@ __pycache__/
 venv/
 .venv/
 .env
+.env.*
+!.env.example
 *.log
 # данные и база — в репозиторий не кладём
 data/*

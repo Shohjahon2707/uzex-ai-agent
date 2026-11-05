@@ -3,7 +3,7 @@ import json
 
 from django.core.management.base import BaseCommand, CommandError
 
-from agent.llm import create_client, describe_error, get_config, key_pool
+from agent.llm import assistant_tool_message, create_client, describe_error, get_config, key_pool
 
 
 CHECK_TOOL = {
@@ -44,10 +44,7 @@ class Command(BaseCommand):
                 ).choices[0].message
                 if not reply.tool_calls:
                     raise CommandError("API ответил, но модель не вызвала инструмент. Выбери модель с tool calling.")
-                messages.append({"role": "assistant", "content": reply.content,
-                                 "tool_calls": [{"id": tc.id, "type": "function", "function": {
-                                     "name": tc.function.name, "arguments": tc.function.arguments,
-                                 }} for tc in reply.tool_calls]})
+                messages.append(assistant_tool_message(reply))
                 for tc in reply.tool_calls:
                     if tc.function.name != "connection_check":
                         raise CommandError("Модель вернула неизвестный инструмент вместо connection_check.")
