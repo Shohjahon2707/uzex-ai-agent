@@ -1,5 +1,6 @@
 """Настоящий SDK и SQLite с локальным HTTP-сервером вместо платного провайдера."""
 import json
+import io
 import os
 import sqlite3
 import tempfile
@@ -10,6 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from django.test import SimpleTestCase
+from django.core.management import call_command
 
 from agent import service
 
@@ -22,7 +24,10 @@ class Handler(BaseHTTPRequestHandler):
         payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         self.server.auth_headers.append(self.headers.get("Authorization"))
         self.server.requests.append((self.path, payload))
-        status, body = self.server.replies.popleft()
+        if self.server.reject_forced_thinking_tools and payload.get("tool_choice") == "required":
+            status, body = 400, {"error": {"message": "Thinking mode does not support this tool_choice", "type": "invalid_request_error"}}
+        else:
+            status, body = self.server.replies.popleft()
         data = json.dumps(body).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
@@ -42,6 +47,7 @@ class SDKTests(SimpleTestCase):
         self.server.replies = deque()
         self.server.requests = []
         self.server.auth_headers = []
+        self.server.reject_forced_thinking_tools = False
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.env = patch.dict(os.environ, {
@@ -133,6 +139,25 @@ class SDKTests(SimpleTestCase):
         for path, payload in self.server.requests:
             self.assertEqual(path, "/v1/chat/completions")
             self.assertEqual(payload["model"], "deepseek-v4-pro")
+            self.assertEqual(payload["tool_choice"], "auto")
         messages = self.server.requests[1][1]["messages"]
         self.assertEqual(messages[-2]["reasoning_content"], "test protocol field")
         self.assertNotIn("test protocol field", str(result))
+
+    def test_deepseek_diagnostic_works_with_thinking_mode_that_rejects_required(self):
+        self.server.reject_forced_thinking_tools = True
+        self.server.replies.extend([
+            (200, completion({"content": None, "reasoning_content": "test diagnostic protocol field", "tool_calls": [
+                {"id": "check-thinking", "type": "function", "function": {"name": "connection_check", "arguments": "{}"}}]})),
+            (200, completion({"content": "OK"})),
+        ])
+        env = {"LLM_PROVIDER": "deepseek", "DEEPSEEK_API_KEY": "sdk-thinking-test-value",
+               "DEEPSEEK_BASE_URL": f"http://127.0.0.1:{self.server.server_port}/v1", "DEEPSEEK_MODEL": "deepseek-v4-pro"}
+        output = io.StringIO()
+        with patch.dict(os.environ, env):
+            call_command("check_llm", stdout=output)
+        self.assertIn("OK: API", output.getvalue())
+        self.assertEqual(self.server.requests[0][1]["tool_choice"], "auto")
+        self.assertEqual(self.server.requests[1][1]["messages"][-2]["reasoning_content"], "test diagnostic protocol field")
+        self.assertEqual(len(self.server.requests), 2)
+        self.assertNotIn("sdk-thinking-test-value", output.getvalue())

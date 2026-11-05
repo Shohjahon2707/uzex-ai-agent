@@ -66,6 +66,7 @@ def _chat(client, messages, with_tools=True, deadline=None):
     kwargs = {"model": get_config().model, "messages": messages}
     if with_tools:
         kwargs["tools"] = TOOLS
+        kwargs["tool_choice"] = "auto"
     if _use_temperature:
         kwargs["temperature"] = 0
 
